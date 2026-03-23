@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # LLM API Keys
     ANTHROPIC_API_KEY: str = ""
-    OPENAI_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""  # Gemini API key (replaces OpenAI)
     
     # Data Source API Keys
     FRED_API_KEY: str = ""
@@ -34,9 +34,10 @@ class Settings(BaseSettings):
     API_URL: str = "http://api:8000"
     
     # LLM Model Configuration
-    CLAUDE_SONNET_MODEL: str = "claude-sonnet-4-20250514"
+    # Using cheapest models for pipeline validation — upgrade later
+    CLAUDE_SONNET_MODEL: str = "claude-haiku-4-5-20251001"
     CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
-    GPT4O_MODEL: str = "gpt-4o"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     
     # Operational
     LOG_LEVEL: str = "INFO"
