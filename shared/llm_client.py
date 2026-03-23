@@ -1,6 +1,6 @@
 """
-LLM client wrappers for Claude Sonnet (primary agents), Claude Haiku (bulk ops),
-and GPT-4o (devil's advocate). All services use these instead of direct API calls.
+LLM client wrappers for Claude Haiku (primary agents + bulk ops)
+and Gemini (devil's advocate). All services use these instead of direct API calls.
 """
 
 import json
@@ -8,7 +8,8 @@ import logging
 from typing import Optional
 
 import anthropic
-import openai
+from google import genai
+from google.genai import types
 
 from shared.config import get_settings
 
@@ -17,7 +18,7 @@ settings = get_settings()
 
 # Initialize clients lazily
 _anthropic_client: Optional[anthropic.Anthropic] = None
-_openai_client: Optional[openai.OpenAI] = None
+_gemini_client: Optional[genai.Client] = None
 
 
 def _get_anthropic() -> anthropic.Anthropic:
@@ -27,11 +28,11 @@ def _get_anthropic() -> anthropic.Anthropic:
     return _anthropic_client
 
 
-def _get_openai() -> openai.OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-    return _openai_client
+def _get_gemini() -> genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+    return _gemini_client
 
 
 async def call_claude_sonnet(
@@ -40,7 +41,7 @@ async def call_claude_sonnet(
     max_tokens: int = 4096,
     temperature: float = 0.3,
 ) -> str:
-    """Primary agent analysis via Claude Sonnet."""
+    """Primary agent analysis via Claude (Haiku for cost savings, Sonnet when upgraded)."""
     try:
         client = _get_anthropic()
         response = client.messages.create(
@@ -90,24 +91,21 @@ async def call_gpt4o(
     max_tokens: int = 4096,
     temperature: float = 0.4,
 ) -> str:
-    """Devil's advocate challenges via GPT-4o (different model bias = genuine adversarial tension)."""
+    """Devil's advocate challenges via Gemini (different model provider = genuine adversarial tension)."""
     try:
-        client = _get_openai()
-        response = client.chat.completions.create(
-            model=settings.GPT4O_MODEL,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+        client = _get_gemini()
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=f"{user_message}",
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            ),
         )
-        return response.choices[0].message.content
-    except openai.APIError as e:
-        logger.error(f"GPT-4o API error: {e}")
-        raise
+        return response.text
     except Exception as e:
-        logger.error(f"GPT-4o unexpected error: {e}")
+        logger.error(f"Gemini API error: {e}")
         raise
 
 
@@ -116,7 +114,7 @@ async def call_claude_with_web_search(
     user_message: str,
     max_tokens: int = 4096,
 ) -> str:
-    """Claude Sonnet with web search tool enabled — used by verification engine and weak signal scanner."""
+    """Claude with web search tool enabled — used by verification engine and weak signal scanner."""
     try:
         client = _get_anthropic()
         response = client.messages.create(
