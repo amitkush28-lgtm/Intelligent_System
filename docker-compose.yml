@@ -1,0 +1,163 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # INFRASTRUCTURE
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # APPLICATION SERVICES
+  # ============================================
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/api:/app/services/api
+      - ./prompts:/app/prompts
+      - ./alembic.ini:/app/alembic.ini
+      - ./migrations:/app/migrations
+
+  frontend:
+    build:
+      context: .
+      dockerfile: services/frontend/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_KEY: ${API_KEY:-changeme}
+    depends_on:
+      - api
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/ingestion:/app/services/ingestion
+
+  verification:
+    build:
+      context: .
+      dockerfile: services/verification/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/verification:/app/services/verification
+
+  agents:
+    build:
+      context: .
+      dockerfile: services/agents/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/agents:/app/services/agents
+      - ./prompts:/app/prompts
+
+  feedback:
+    build:
+      context: .
+      dockerfile: services/feedback/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/feedback:/app/services/feedback
+
+  signals:
+    build:
+      context: .
+      dockerfile: services/signals/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/intelligence
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared
+      - ./services/__init__.py:/app/services/__init__.py
+      - ./services/signals:/app/services/signals
+
+volumes:
+  pgdata:

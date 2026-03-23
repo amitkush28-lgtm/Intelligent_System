@@ -1,0 +1,32 @@
+[service]
+# Each service maps to a directory in the monorepo
+
+[[services]]
+name = "api"
+root = "services/api"
+
+[[services]]
+name = "frontend"
+root = "services/frontend"
+
+[[services]]
+name = "ingestion"
+root = "services/ingestion"
+cron = "0 */4 * * *"
+
+[[services]]
+name = "verification"
+root = "services/verification"
+
+[[services]]
+name = "agents"
+root = "services/agents"
+
+[[services]]
+name = "feedback"
+root = "services/feedback"
+
+[[services]]
+name = "signals"
+root = "services/signals"
+cron = "0 6 * * *"
