@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getDashboardMetrics, getCalibrationCurve } from '@/lib/api';
+import {
+  getDashboardMetrics,
+  getCalibrationCurve,
+  triggerIngestion,
+  triggerAgents,
+  triggerFeedback,
+  triggerSignals,
+} from '@/lib/api';
 import { DashboardMetrics, CalibrationCurveResponse } from '@/lib/types';
 import MetricCard from '@/components/layout/MetricCard';
 import CalibrationChart from '@/components/charts/CalibrationChart';
@@ -16,28 +23,93 @@ import {
   getAgentBgClass,
 } from '@/lib/utils';
 
+type TriggerStatus = 'idle' | 'running' | 'done' | 'error';
+
+interface PipelineStep {
+  label: string;
+  trigger: () => Promise<any>;
+  status: TriggerStatus;
+  message?: string;
+}
+
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [calibration, setCalibration] = useState<CalibrationCurveResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [steps, setSteps] = useState<PipelineStep[]>([
+    { label: 'Ingest Data', trigger: triggerIngestion, status: 'idle' },
+    { label: 'Run Agents', trigger: triggerAgents, status: 'idle' },
+    { label: 'Run Feedback', trigger: triggerFeedback, status: 'idle' },
+    { label: 'Scan Signals', trigger: triggerSignals, status: 'idle' },
+  ]);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+
   useEffect(() => {
-    async function load() {
-      try {
-        const [m, c] = await Promise.all([
-          getDashboardMetrics(),
-          getCalibrationCurve(),
-        ]);
-        setMetrics(m);
-        setCalibration(c);
-      } catch (e: any) {
-        setError(e.message || 'Failed to load dashboard');
-      }
-    }
-    load();
+    loadDashboard();
   }, []);
 
-  if (error) {
+  async function loadDashboard() {
+    try {
+      const [m, c] = await Promise.all([
+        getDashboardMetrics(),
+        getCalibrationCurve(),
+      ]);
+      setMetrics(m);
+      setCalibration(c);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || 'Failed to load dashboard');
+    }
+  }
+
+  function updateStep(index: number, updates: Partial<PipelineStep>) {
+    setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, ...updates } : s)));
+  }
+
+  async function runSingleStep(index: number) {
+    const step = steps[index];
+    updateStep(index, { status: 'running', message: undefined });
+    try {
+      const result = await step.trigger();
+      updateStep(index, { status: 'done', message: result.message });
+    } catch (e: any) {
+      updateStep(index, { status: 'error', message: e.message });
+    }
+  }
+
+  async function runFullPipeline() {
+    setPipelineRunning(true);
+    for (let i = 0; i < steps.length; i++) {
+      updateStep(i, { status: 'running', message: undefined });
+      try {
+        const result = await steps[i].trigger();
+        updateStep(i, { status: 'done', message: result.message });
+        // Wait a moment between steps to let background tasks start
+        await new Promise((r) => setTimeout(r, 2000));
+      } catch (e: any) {
+        updateStep(i, { status: 'error', message: e.message });
+      }
+    }
+    setPipelineRunning(false);
+    // Refresh dashboard after pipeline
+    setTimeout(loadDashboard, 5000);
+  }
+
+  function resetPipeline() {
+    setSteps((prev) => prev.map((s) => ({ ...s, status: 'idle' as TriggerStatus, message: undefined })));
+  }
+
+  const statusIcon = (status: TriggerStatus) => {
+    switch (status) {
+      case 'idle': return <span className="text-slate-600">&#x25CB;</span>;
+      case 'running': return <span className="text-blue-400 animate-spin inline-block">&#x25E0;</span>;
+      case 'done': return <span className="text-emerald-400">&#x2713;</span>;
+      case 'error': return <span className="text-red-400">&#x2717;</span>;
+    }
+  };
+
+  if (error && !metrics) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
         <div className="text-red-400 text-sm font-medium">Connection Error</div>
@@ -65,6 +137,62 @@ export default function DashboardPage() {
         <div className="text-[10px] text-slate-600 uppercase tracking-widest">
           Live
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 ml-1.5 animate-pulse-soft" />
+        </div>
+      </div>
+
+      {/* Pipeline Control Panel */}
+      <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-slate-200">Pipeline Control</h3>
+          <div className="flex gap-2">
+            <button
+              onClick={runFullPipeline}
+              disabled={pipelineRunning}
+              className="text-xs px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {pipelineRunning ? 'Running...' : 'Run Full Pipeline'}
+            </button>
+            <button
+              onClick={resetPipeline}
+              disabled={pipelineRunning}
+              className="text-xs px-3 py-2 rounded-lg bg-surface-600 text-slate-300 hover:bg-surface-500 disabled:opacity-50 transition-colors"
+            >
+              Reset
+            </button>
+            <button
+              onClick={loadDashboard}
+              className="text-xs px-3 py-2 rounded-lg bg-surface-600 text-slate-300 hover:bg-surface-500 transition-colors"
+            >
+              Refresh Data
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {steps.map((step, i) => (
+            <div
+              key={step.label}
+              className="bg-surface-800/50 border border-slate-700/30 rounded-lg p-3"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">{statusIcon(step.status)}</span>
+                  <span className="text-xs font-medium text-slate-300">{step.label}</span>
+                </div>
+                <button
+                  onClick={() => runSingleStep(i)}
+                  disabled={pipelineRunning || step.status === 'running'}
+                  className="text-[10px] px-2 py-1 rounded bg-surface-600 text-slate-400 hover:bg-surface-500 hover:text-slate-200 disabled:opacity-30 transition-colors"
+                >
+                  Run
+                </button>
+              </div>
+              {step.message && (
+                <p className={`text-[10px] truncate ${step.status === 'error' ? 'text-red-400' : 'text-slate-500'}`}>
+                  {step.message}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -111,7 +239,7 @@ export default function DashboardPage() {
         <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5 max-h-[400px] overflow-y-auto">
           <h3 className="text-sm font-semibold text-slate-200 mb-3">Recent Activity</h3>
           {metrics.recent_activity.length === 0 ? (
-            <p className="text-xs text-slate-500">No recent activity</p>
+            <p className="text-xs text-slate-500">No recent activity. Run the pipeline to get started.</p>
           ) : (
             <div className="space-y-2.5">
               {metrics.recent_activity.slice(0, 15).map((item, i) => (
