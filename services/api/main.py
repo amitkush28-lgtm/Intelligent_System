@@ -63,6 +63,7 @@ from services.api.routes.claims import router as claims_router
 from services.api.routes.decisions import router as decisions_router
 from services.api.routes.events import router as events_router
 from services.api.routes.chat import router as chat_router
+from services.api.routes.trigger import router as trigger_router
 
 app.include_router(predictions_router)
 app.include_router(agents_router)
@@ -73,3 +74,4 @@ app.include_router(claims_router)
 app.include_router(decisions_router)
 app.include_router(events_router)
 app.include_router(chat_router)
+app.include_router(trigger_router)
