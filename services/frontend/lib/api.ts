@@ -213,6 +213,33 @@ export async function getDecisions(params?: {
 }
 
 // ============================================
+// TRIGGER (manual pipeline runs)
+// ============================================
+
+export interface TriggerResponse {
+  status: string;
+  service: string;
+  message: string;
+  triggered_at: string;
+}
+
+export async function triggerIngestion(): Promise<TriggerResponse> {
+  return apiFetch<TriggerResponse>('/trigger/ingestion', { method: 'POST' });
+}
+
+export async function triggerAgents(): Promise<TriggerResponse> {
+  return apiFetch<TriggerResponse>('/trigger/agents', { method: 'POST' });
+}
+
+export async function triggerFeedback(): Promise<TriggerResponse> {
+  return apiFetch<TriggerResponse>('/trigger/feedback', { method: 'POST' });
+}
+
+export async function triggerSignals(): Promise<TriggerResponse> {
+  return apiFetch<TriggerResponse>('/trigger/signals', { method: 'POST' });
+}
+
+// ============================================
 // WEBSOCKET
 // ============================================
 
