@@ -38,7 +38,7 @@ def _get_gemini() -> genai.Client:
 async def call_claude_sonnet(
     system_prompt: str,
     user_message: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     temperature: float = 0.3,
 ) -> str:
     """Primary agent analysis via Claude (Haiku for cost savings, Sonnet when upgraded)."""
@@ -63,7 +63,7 @@ async def call_claude_sonnet(
 async def call_claude_haiku(
     system_prompt: str,
     user_message: str,
-    max_tokens: int = 2048,
+    max_tokens: int = 4096,
     temperature: float = 0.2,
 ) -> str:
     """Bulk operations via Claude Haiku — classification, sentiment, sponsored detection."""
@@ -88,7 +88,7 @@ async def call_claude_haiku(
 async def call_gpt4o(
     system_prompt: str,
     user_message: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     temperature: float = 0.4,
 ) -> str:
     """Devil's advocate challenges via Gemini (different model provider = genuine adversarial tension)."""
@@ -112,7 +112,7 @@ async def call_gpt4o(
 async def call_claude_with_web_search(
     system_prompt: str,
     user_message: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ) -> str:
     """Claude with web search tool enabled — used by verification engine and weak signal scanner."""
     try:
