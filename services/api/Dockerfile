@@ -6,20 +6,28 @@ WORKDIR /app
 COPY shared/requirements.txt /app/shared/requirements.txt
 RUN pip install --no-cache-dir -r /app/shared/requirements.txt
 
-# Install service dependencies
+# Install service dependencies (includes all worker deps for trigger routes)
 COPY services/api/requirements.txt /app/services/api/requirements.txt
 RUN pip install --no-cache-dir -r /app/services/api/requirements.txt
+
+# Download spaCy model for ingestion
+RUN python -m spacy download en_core_web_sm
 
 # Copy shared library
 COPY shared/ /app/shared/
 
-# Copy service package init (required for services.api.* imports)
+# Copy service package init
 COPY services/__init__.py /app/services/__init__.py
 
-# Copy service code
+# Copy ALL services (needed for trigger routes to run pipelines in-process)
 COPY services/api/ /app/services/api/
+COPY services/ingestion/ /app/services/ingestion/
+COPY services/agents/ /app/services/agents/
+COPY services/feedback/ /app/services/feedback/
+COPY services/signals/ /app/services/signals/
+COPY services/verification/ /app/services/verification/
 
-# Copy prompts (needed by chat endpoint)
+# Copy prompts (needed by agents and chat endpoint)
 COPY prompts/ /app/prompts/
 
 # Copy alembic for migrations
