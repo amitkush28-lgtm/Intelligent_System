@@ -74,6 +74,17 @@ export default function PredictionDetailPage() {
   const p = prediction;
   const deadline = p.time_condition_end || p.time_condition_date;
 
+  // Extract initial reasoning from first confidence trail entry
+  const initialTrail = p.confidence_trail.length > 0
+    ? [...p.confidence_trail].sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime())[0]
+    : null;
+  const initialReasoning = initialTrail?.reasoning || '';
+
+  // Collect all unique reasoning entries from confidence trail (excluding initial)
+  const reasoningHistory = p.confidence_trail
+    .filter((t) => t.reasoning && t.reasoning !== initialReasoning)
+    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* Breadcrumb */}
@@ -125,14 +136,21 @@ export default function PredictionDetailPage() {
         </div>
       </div>
 
-      {/* Confidence trail chart */}
-      <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-slate-200 mb-3">Confidence History</h3>
-        <ConfidenceTrailChart trail={p.confidence_trail} />
-      </div>
+      {/* Analysis & Reasoning — PROMINENT SECTION */}
+      {initialReasoning && (
+        <div className="bg-surface-700/50 border border-blue-500/20 rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-blue-400 text-lg">&#x1F9E0;</span>
+            <h3 className="text-sm font-semibold text-slate-200">Analysis & Reasoning</h3>
+          </div>
+          <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+            {initialReasoning}
+          </div>
+        </div>
+      )}
 
+      {/* Resolution Criteria + Key Info */}
       <div className="grid grid-cols-2 gap-4">
-        {/* Resolution criteria */}
         <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-slate-200 mb-3">Resolution Criteria</h3>
           <p className="text-sm text-slate-300 leading-relaxed">{p.resolution_criteria}</p>
@@ -152,8 +170,44 @@ export default function PredictionDetailPage() {
             </div>
           </div>
         )}
+      </div>
 
-        {/* Parent / Sub-predictions */}
+      {/* Confidence trail chart */}
+      <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-200 mb-3">Confidence History</h3>
+        <ConfidenceTrailChart trail={p.confidence_trail} />
+      </div>
+
+      {/* Reasoning History — shows all confidence change explanations */}
+      {reasoningHistory.length > 0 && (
+        <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-200 mb-4">
+            Confidence Change Log ({reasoningHistory.length})
+          </h3>
+          <div className="space-y-3">
+            {reasoningHistory.map((t, i) => (
+              <div
+                key={t.id}
+                className="flex items-start gap-3 text-sm border-b border-slate-800/50 pb-3 last:border-0"
+              >
+                <div className="text-right min-w-[60px]">
+                  <span className="text-blue-400 font-mono text-xs">
+                    {(t.value * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-amber-400/80 mb-1">{t.trigger}</p>
+                  <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{t.reasoning}</p>
+                  <p className="text-[10px] text-slate-600 mt-1">{formatDateTime(t.date)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Parent / Sub-predictions */}
+      <div className="grid grid-cols-2 gap-4">
         {p.parent_id && (
           <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl p-5">
             <h3 className="text-sm font-semibold text-slate-200 mb-3">Parent Prediction</h3>
