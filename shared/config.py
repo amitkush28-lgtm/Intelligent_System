@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     
     # LLM Model Configuration
     # Using cheapest models for pipeline validation — upgrade later
-    CLAUDE_SONNET_MODEL: str = "claude-haiku-4-5-20251001"
+    CLAUDE_SONNET_MODEL: str = "claude-sonnet-4-20250514"
     CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
     GEMINI_MODEL: str = "gemini-2.5-flash"
     
