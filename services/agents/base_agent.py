@@ -63,7 +63,7 @@ For every prediction, you MUST provide ALL of:
 - TIME_CONDITION: [point date OR date range with explicit deadline]
 - CONFIDENCE: [0.0 to 1.0, decimal]
 - RESOLUTION_CRITERIA: [exactly how we determine TRUE or FALSE]
-- REASONING: [DETAILED narrative analysis — write this as if you are a senior intelligence analyst writing an opinion piece for policymakers. Include: the key events driving this prediction, the structural forces at play, the actors and their motivations, why the consensus may be wrong, and the second/third-order effects most people miss. Minimum 3 paragraphs. This is the MOST IMPORTANT field.]
+- REASONING: [structured argument referencing the 7-question chain]
 - BASE_RATE: [historical frequency if available, or "no reference class"]
 - KEY_TRIGGERS: [specific events that would change this prediction up or down]
 - SUB_PREDICTIONS: [faster-resolving claims that serve as leading indicators]
@@ -82,7 +82,7 @@ You MUST respond with ONLY valid JSON (no markdown, no preamble). Structure:
             "time_condition_end": "YYYY-MM-DD",
             "confidence": 0.65,
             "resolution_criteria": "exactly how we know TRUE or FALSE",
-            "reasoning": "DETAILED multi-paragraph analysis written like a senior intelligence analyst's opinion piece. Explain the structural forces, actor motivations, key evidence, consensus errors, and second-order effects. Minimum 3 paragraphs. This is the most valuable part of your output — make it insightful, specific, and actionable.",
+            "reasoning": "structured argument using 7-question chain",
             "base_rate": "historical frequency or 'no reference class'",
             "key_triggers": ["event that would increase confidence", "event that would decrease confidence"],
             "sub_predictions": [
@@ -100,7 +100,7 @@ You MUST respond with ONLY valid JSON (no markdown, no preamble). Structure:
         {
             "prediction_id": "PRED-2026-XXXX",
             "new_confidence": 0.72,
-            "reasoning": "detailed explanation of why confidence changed — include what new evidence emerged and how it shifts the structural analysis",
+            "reasoning": "why confidence changed",
             "trigger": "what event caused this update"
         }
     ],
@@ -188,6 +188,9 @@ class BaseAgent:
 
         msg = f"""Analyze the following intelligence and produce predictions.
 
+## CURRENT MARKET PRICES (LIVE DATA — USE THESE, NOT MEMORIZED PRICES)
+{formatted.get('CURRENT_MARKET_DATA', 'No live market data available. DO NOT cite specific prices from memory.')}
+
 ## CROSS-DOMAIN SIGNALS FROM OTHER AGENTS
 {formatted.get('CROSS_DOMAIN_SIGNALS', 'No cross-domain signals yet.')}
 
@@ -205,9 +208,11 @@ class BaseAgent:
 
 Today's date: {datetime.utcnow().strftime('%Y-%m-%d')}
 
+CRITICAL: When making predictions involving specific prices, rates, or levels, you MUST use the CURRENT MARKET PRICES above. Your training data contains outdated prices. Always ground predictions in live data.
+
 Apply the 7-question structural reasoning chain to the most significant events. Update existing predictions where warranted. Generate new predictions for emerging themes.
 
-IMPORTANT: For the "reasoning" field of each prediction, write a DETAILED multi-paragraph analysis as if you were writing an intelligence briefing for a senior policymaker. Explain the structural forces, actor motivations, key evidence, where consensus may be wrong, and the second/third-order effects. This reasoning is the most valuable part of your output.
+IMPORTANT: For the "reasoning" field, write a DETAILED multi-paragraph analysis like an intelligence briefing for a senior policymaker.
 
 Respond with ONLY valid JSON.
 """
@@ -235,7 +240,7 @@ Respond with ONLY valid JSON.
             raw_response = await call_claude_sonnet(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=8192,
+                max_tokens=4096,
                 temperature=0.3,
             )
 
