@@ -103,6 +103,9 @@ def build_agent_context(
     # 9. Cross-domain signals from other agents
     context["cross_domain_signals"] = _get_cross_domain_signals(db, agent_name)
 
+    # 10. Current market data — ALL agents need this to avoid stale price references
+    context["current_market_data"] = _get_current_market_data(db)
+
     return context
 
 
@@ -112,6 +115,16 @@ def format_context_for_prompt(context: Dict[str, Any]) -> Dict[str, str]:
     Each key maps to a section of the agent's system prompt template.
     """
     formatted = {}
+
+    # Current market data — CRITICAL: shown to ALL agents at top of context
+    market_data = context.get("current_market_data", [])
+    if market_data:
+        lines = ["*** USE THESE LIVE PRICES — DO NOT USE MEMORIZED/TRAINING PRICES ***"]
+        for m in market_data:
+            lines.append(f"- {m['name']} ({m['symbol']}): {m['price']} ({m['change']})")
+        formatted["CURRENT_MARKET_DATA"] = "\n".join(lines)
+    else:
+        formatted["CURRENT_MARKET_DATA"] = "No live market data available. DO NOT cite specific prices from memory — they may be outdated."
 
     # Today's events
     events = context.get("todays_events", [])
@@ -692,4 +705,81 @@ def get_recent_debates(db: Session, agent_name: str, limit: int = 5) -> List[Dic
 
     except Exception as e:
         logger.error(f"Failed to get recent debates: {e}")
+        return []
+
+
+def _get_current_market_data(db: Session) -> List[Dict[str, Any]]:
+    """
+    Get the latest market prices from Twelve Data events.
+    These are shown to ALL agents to ground their analysis in reality.
+    """
+    try:
+        # Get most recent market_data events (last 24h)
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        market_events = (
+            db.query(Event)
+            .filter(
+                Event.source == "twelve_data",
+                Event.timestamp >= cutoff,
+            )
+            .order_by(desc(Event.timestamp))
+            .limit(30)
+            .all()
+        )
+
+        prices = []
+        seen_symbols = set()
+
+        for e in market_events:
+            raw = e.raw_text or ""
+            # Avoid duplicates — keep latest per symbol
+            entities = e.entities or []
+            symbol = ""
+            for ent in entities:
+                if ent.get("type") == "instrument":
+                    symbol = ent.get("name", "")
+                    break
+
+            if symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
+
+            # Extract price from raw_text: "CURRENT MARKET PRICE: Gold Spot (XAU/USD) at 4,487.32, up 0.45%..."
+            price_str = ""
+            change_str = ""
+            if " at " in raw:
+                after_at = raw.split(" at ", 1)[1]
+                price_str = after_at.split(",")[0].strip()
+                if "%" in raw:
+                    # Find the percentage part
+                    for part in raw.split():
+                        if "%" in part:
+                            change_str = part
+                            break
+                    # Get direction
+                    if "up " in raw.lower():
+                        change_str = "+" + change_str
+                    elif "down " in raw.lower():
+                        change_str = "-" + change_str
+
+            if not price_str:
+                price_str = raw[:100]
+
+            # Also try to get symbol from event ID (td-XAU-USD-20260326)
+            event_symbol = ""
+            if e.id and e.id.startswith("td-"):
+                event_symbol = e.id.replace("td-", "").rsplit("-", 1)[0].replace("-", "/")
+
+            prices.append({
+                "name": symbol or "Unknown",
+                "symbol": event_symbol or symbol,
+                "price": price_str,
+                "change": change_str or "N/A",
+                "raw_text": raw[:200],
+            })
+
+        return prices
+
+    except Exception as e:
+        logger.error(f"Failed to get current market data: {e}")
         return []
