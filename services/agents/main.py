@@ -9,8 +9,9 @@ Also runs as daily cron (08:00 UTC) for comprehensive re-analysis.
 
 Agent execution order:
 1. 5 specialist agents (can run in any order, each independent)
-2. Master Strategist (runs AFTER all specialists, receives their outputs)
+2. Reality Check agent (web search validation of all new predictions)
 3. Devil's advocate challenges (triggered by specialist outputs)
+4. Master Strategist (runs AFTER all specialists, receives their outputs)
 """
 
 import asyncio
@@ -521,7 +522,42 @@ async def run_analysis_cycle() -> Dict[str, Any]:
                 stats["agents_failed"].append(agent.agent_name)
                 # Continue with other agents — graceful degradation
 
-        # Phase 2: Devil's advocate challenges
+        # Phase 2: Reality Check — validate new predictions against live web data
+        logger.info("--- Running Reality Check (web search validation) ---")
+        try:
+            from services.agents.reality_check import run_reality_check
+
+            # Collect all new predictions from this cycle with their IDs
+            new_preds_for_check = []
+            for agent_name, output in specialist_outputs.items():
+                for pred_data in output.get("new_predictions", []):
+                    claim = pred_data.get("claim", "")
+                    # Find the prediction we just created
+                    pred = (
+                        db.query(Prediction)
+                        .filter(
+                            Prediction.agent == agent_name,
+                            Prediction.claim == claim,
+                            Prediction.status == "ACTIVE",
+                        )
+                        .first()
+                    )
+                    if pred:
+                        new_preds_for_check.append({
+                            "pred_id": pred.id,
+                            "claim": pred.claim,
+                            "confidence": pred.current_confidence,
+                            "resolution_criteria": pred.resolution_criteria,
+                            "agent": pred.agent,
+                        })
+
+            reality_stats = await run_reality_check(new_preds_for_check, db)
+            stats["reality_check"] = reality_stats
+        except Exception as e:
+            logger.error(f"Reality check phase failed: {e}")
+            stats["reality_check"] = {"error": str(e)[:200]}
+
+        # Phase 3: Devil's advocate challenges
         logger.info("--- Running Devil's Advocate Challenges ---")
         try:
             debate_stats = await _run_devil_advocates(specialist_outputs, db)
@@ -530,7 +566,7 @@ async def run_analysis_cycle() -> Dict[str, Any]:
             logger.error(f"Devil's advocate phase failed: {e}")
             stats["debates"] = {"error": str(e)[:200]}
 
-        # Phase 3: Master Strategist
+        # Phase 4: Master Strategist
         try:
             master_output = await _run_master(specialist_outputs, db)
             stats["master_output"] = {
