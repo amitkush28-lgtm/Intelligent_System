@@ -34,12 +34,12 @@ from services.ingestion.sources.fred import fetch_fred_events
 from services.ingestion.sources.rss_feeds import fetch_rss_events
 from services.ingestion.sources.newsdata import fetch_newsdata_events
 from services.ingestion.sources.twelve_data import fetch_twelve_data_events
-from services.ingestion.sources.propublica import fetch_propublica_events
+from services.ingestion.sources.congress_gov import fetch_congress_events
 from services.ingestion.sources.acled import fetch_acled_events
 from services.ingestion.sources.polymarket import fetch_polymarket_events
 from services.ingestion.sources.cftc import fetch_cftc_events
 
-# Source imports — Phase 2 (new)
+# Source imports — Phase 2
 from services.ingestion.sources.sec_edgar import fetch_sec_edgar_events
 from services.ingestion.sources.bls import fetch_bls_events
 from services.ingestion.sources.world_bank import fetch_world_bank_events
@@ -79,7 +79,7 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
         "rss": "established_newspaper",
         "newsdata": "regional_outlet",
         "twelve_data": "government_statement",
-        "propublica": "established_newspaper",
+        "congress_gov": "government_statement",
         "acled": "established_newspaper",
         "polymarket": "verified_social_media",
         "cftc": "government_statement",
@@ -118,7 +118,7 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("RSS", fetch_rss_events),
         ("NewsData", fetch_newsdata_events),
         ("TwelveData", fetch_twelve_data_events),
-        ("ProPublica", fetch_propublica_events),
+        ("Congress", fetch_congress_events),
         ("ACLED", fetch_acled_events),
         ("Polymarket", fetch_polymarket_events),
         ("CFTC", fetch_cftc_events),
