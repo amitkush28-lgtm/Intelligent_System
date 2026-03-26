@@ -2,6 +2,9 @@
 Twelve Data API (twelvedata.com) — 800 requests/day free tier.
 Stock/forex/crypto prices. Pulls major indices (S&P 500, NASDAQ, VIX)
 and tracked tickers.
+
+CRITICAL: Always generates events for ALL instruments, not just notable moves.
+Agents need current prices to avoid making predictions based on stale training data.
 """
 
 import logging
@@ -20,32 +23,32 @@ TWELVE_DATA_BASE_URL = "https://api.twelvedata.com"
 # Key instruments to track
 INSTRUMENTS = {
     # Major US indices
-    "SPX": {"name": "S&P 500", "type": "index", "exchange": ""},
-    "IXIC": {"name": "NASDAQ Composite", "type": "index", "exchange": ""},
-    "DJI": {"name": "Dow Jones Industrial", "type": "index", "exchange": ""},
-    "VIX": {"name": "CBOE Volatility Index", "type": "index", "exchange": ""},
+    "SPX": {"name": "S&P 500", "type": "index"},
+    "IXIC": {"name": "NASDAQ Composite", "type": "index"},
+    "DJI": {"name": "Dow Jones Industrial", "type": "index"},
+    "VIX": {"name": "CBOE Volatility Index", "type": "index"},
 
     # Key stocks
-    "AAPL": {"name": "Apple", "type": "stock", "exchange": "NASDAQ"},
-    "MSFT": {"name": "Microsoft", "type": "stock", "exchange": "NASDAQ"},
-    "NVDA": {"name": "NVIDIA", "type": "stock", "exchange": "NASDAQ"},
-    "GOOGL": {"name": "Alphabet", "type": "stock", "exchange": "NASDAQ"},
-    "AMZN": {"name": "Amazon", "type": "stock", "exchange": "NASDAQ"},
-    "TSLA": {"name": "Tesla", "type": "stock", "exchange": "NASDAQ"},
+    "AAPL": {"name": "Apple", "type": "stock"},
+    "MSFT": {"name": "Microsoft", "type": "stock"},
+    "NVDA": {"name": "NVIDIA", "type": "stock"},
+    "GOOGL": {"name": "Alphabet", "type": "stock"},
+    "AMZN": {"name": "Amazon", "type": "stock"},
+    "TSLA": {"name": "Tesla", "type": "stock"},
 
     # Forex
-    "EUR/USD": {"name": "Euro/Dollar", "type": "forex", "exchange": ""},
-    "GBP/USD": {"name": "Pound/Dollar", "type": "forex", "exchange": ""},
-    "USD/JPY": {"name": "Dollar/Yen", "type": "forex", "exchange": ""},
-    "USD/CNY": {"name": "Dollar/Yuan", "type": "forex", "exchange": ""},
+    "EUR/USD": {"name": "Euro/Dollar", "type": "forex"},
+    "GBP/USD": {"name": "Pound/Dollar", "type": "forex"},
+    "USD/JPY": {"name": "Dollar/Yen", "type": "forex"},
+    "USD/CNY": {"name": "Dollar/Yuan", "type": "forex"},
 
     # Commodities
-    "GC": {"name": "Gold Futures", "type": "commodity", "exchange": "COMEX"},
-    "CL": {"name": "Crude Oil WTI", "type": "commodity", "exchange": "NYMEX"},
+    "XAU/USD": {"name": "Gold Spot", "type": "commodity"},
+    "CL": {"name": "Crude Oil WTI", "type": "commodity"},
 
     # Crypto
-    "BTC/USD": {"name": "Bitcoin", "type": "crypto", "exchange": ""},
-    "ETH/USD": {"name": "Ethereum", "type": "crypto", "exchange": ""},
+    "BTC/USD": {"name": "Bitcoin", "type": "crypto"},
+    "ETH/USD": {"name": "Ethereum", "type": "crypto"},
 }
 
 
@@ -54,7 +57,6 @@ def _get_severity(pct_change: float, instrument_type: str) -> str:
     abs_pct = abs(pct_change)
 
     if instrument_type == "crypto":
-        # Crypto is more volatile, higher thresholds
         if abs_pct > 10.0:
             return "significant"
         elif abs_pct > 5.0:
@@ -82,7 +84,7 @@ async def fetch_twelve_data_events(
 ) -> List[Dict[str, Any]]:
     """
     Fetch latest price data from Twelve Data.
-    Returns list of event dicts for instruments with notable moves.
+    Returns events for ALL instruments so agents know current prices.
     """
     if not settings.TWELVE_DATA_API_KEY:
         logger.warning("TWELVE_DATA_API_KEY not set, skipping Twelve Data source")
@@ -108,37 +110,73 @@ async def fetch_twelve_data_events(
                 data = resp.json()
 
                 # Handle single vs multi-symbol response
-                if isinstance(data, dict) and "symbol" in data:
-                    # Single symbol response
+                if isinstance(data, dict) and "symbol" in data and "close" in data:
                     quotes = {data["symbol"]: data}
                 elif isinstance(data, dict):
                     quotes = data
                 else:
+                    logger.warning(f"Unexpected Twelve Data response type: {type(data)}")
                     continue
 
                 for symbol, quote in quotes.items():
                     try:
-                        if not isinstance(quote, dict) or "close" not in quote:
+                        if not isinstance(quote, dict):
                             continue
-                        if quote.get("status") == "error":
+                        if quote.get("status") == "error" or quote.get("code"):
+                            logger.debug(f"TwelveData error for {symbol}: {quote.get('message', 'unknown')}")
                             continue
 
-                        close = float(quote.get("close", 0))
-                        previous_close = float(quote.get("previous_close", close))
-                        pct_change = float(quote.get("percent_change", 0))
+                        # Parse prices — handle string values
+                        close = quote.get("close")
+                        previous_close = quote.get("previous_close")
+                        pct_change = quote.get("percent_change")
+
+                        if close is None:
+                            continue
+
+                        try:
+                            close = float(close)
+                        except (ValueError, TypeError):
+                            continue
+
+                        try:
+                            previous_close = float(previous_close) if previous_close else close
+                        except (ValueError, TypeError):
+                            previous_close = close
+
+                        try:
+                            pct_change = float(pct_change) if pct_change else 0.0
+                        except (ValueError, TypeError):
+                            if previous_close and previous_close != 0:
+                                pct_change = ((close - previous_close) / previous_close) * 100
+                            else:
+                                pct_change = 0.0
+
                         volume = quote.get("volume", 0)
+                        try:
+                            volume = int(volume) if volume else 0
+                        except (ValueError, TypeError):
+                            volume = 0
 
-                        info = INSTRUMENTS.get(symbol, {
-                            "name": symbol,
-                            "type": "stock",
-                            "exchange": "",
-                        })
+                        info = INSTRUMENTS.get(symbol, {"name": symbol, "type": "stock"})
                         severity = _get_severity(pct_change, info["type"])
 
                         direction = "up" if pct_change > 0 else "down" if pct_change < 0 else "flat"
+
+                        # Format price based on type
+                        if info["type"] == "forex":
+                            price_str = f"{close:.4f}"
+                            prev_str = f"{previous_close:.4f}"
+                        elif close > 1000:
+                            price_str = f"{close:,.2f}"
+                            prev_str = f"{previous_close:,.2f}"
+                        else:
+                            price_str = f"{close:.2f}"
+                            prev_str = f"{previous_close:.2f}"
+
                         raw_text = (
-                            f"Market Data: {info['name']} ({symbol}) closed at {close:.2f}, "
-                            f"{direction} {abs(pct_change):.2f}% from previous close of {previous_close:.2f}."
+                            f"CURRENT MARKET PRICE: {info['name']} ({symbol}) at {price_str}, "
+                            f"{direction} {abs(pct_change):.2f}% from previous {prev_str}."
                         )
                         if volume:
                             raw_text += f" Volume: {volume:,}."
@@ -149,7 +187,12 @@ async def fetch_twelve_data_events(
                         except (ValueError, TypeError):
                             timestamp = datetime.utcnow()
 
+                        # Generate unique ID based on date to avoid dedup issues
+                        date_str = datetime.utcnow().strftime("%Y%m%d")
+                        event_id = f"td-{symbol.replace('/', '-')}-{date_str}"
+
                         events.append({
+                            "id": event_id,
                             "source": "twelve_data",
                             "source_detail": f"twelvedata.com/{symbol}",
                             "timestamp": timestamp,
@@ -167,10 +210,12 @@ async def fetch_twelve_data_events(
                                 "previous_close": previous_close,
                                 "percent_change": pct_change,
                                 "volume": volume,
-                                "exchange": info.get("exchange", ""),
                             },
                         })
-                    except (ValueError, TypeError) as e:
+
+                        logger.debug(f"  {symbol}: {price_str} ({pct_change:+.2f}%)")
+
+                    except Exception as e:
                         logger.debug(f"Error parsing Twelve Data quote for {symbol}: {e}")
                         continue
 
