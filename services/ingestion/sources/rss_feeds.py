@@ -1,6 +1,6 @@
 """
-RSS feed aggregator for major news outlets.
-Sources: BBC, Al Jazeera, Reuters, NYT, Guardian, FT headlines.
+RSS feed aggregator for major news outlets and think tanks.
+Sources: BBC, Al Jazeera, Reuters, NYT, Guardian, FT, CSIS, Brookings, CFR, IISS, etc.
 No API keys needed — uses feedparser library.
 """
 
@@ -15,15 +15,11 @@ logger = logging.getLogger(__name__)
 
 # RSS feed configuration: (name, url, source_category)
 RSS_FEEDS = [
-    # Wire services / Major outlets
-    ("Reuters World", "https://feeds.reuters.com/Reuters/worldNews", "reuters"),
-    ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews", "reuters"),
-    ("AP Top News", "https://rsshub.app/apnews/topics/apf-topnews", "ap"),
-
-    # BBC
+    # BBC (most reliable RSS feeds)
     ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml", "established_newspaper"),
     ("BBC Business", "http://feeds.bbci.co.uk/news/business/rss.xml", "established_newspaper"),
     ("BBC Politics", "http://feeds.bbci.co.uk/news/politics/rss.xml", "established_newspaper"),
+    ("BBC Technology", "http://feeds.bbci.co.uk/news/technology/rss.xml", "established_newspaper"),
 
     # Al Jazeera
     ("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "established_newspaper"),
@@ -32,6 +28,7 @@ RSS_FEEDS = [
     ("NYT World", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "established_newspaper"),
     ("NYT Business", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "established_newspaper"),
     ("NYT Politics", "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml", "established_newspaper"),
+    ("NYT Economy", "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "established_newspaper"),
 
     # Guardian
     ("Guardian World", "https://www.theguardian.com/world/rss", "established_newspaper"),
@@ -40,9 +37,25 @@ RSS_FEEDS = [
     # FT (limited free RSS)
     ("FT World", "https://www.ft.com/world?format=rss", "established_newspaper"),
 
-    # Think tanks (bonus)
+    # Think tanks — geopolitical and policy analysis
+    ("CSIS", "https://www.csis.org/analysis/feed", "think_tank"),
     ("Brookings", "https://www.brookings.edu/feed/", "think_tank"),
     ("CFR", "https://www.cfr.org/rss/publication", "think_tank"),
+    ("Carnegie", "https://carnegieendowment.org/rss/solr.xml", "think_tank"),
+    ("RAND", "https://www.rand.org/news/press.xml", "think_tank"),
+    ("Atlantic Council", "https://www.atlanticcouncil.org/feed/", "think_tank"),
+    ("Chatham House", "https://www.chathamhouse.org/feed", "think_tank"),
+    ("Stimson Center", "https://www.stimson.org/feed/", "think_tank"),
+
+    # Economic policy
+    ("Peterson Institute", "https://www.piie.com/rss.xml", "think_tank"),
+    ("EPI", "https://www.epi.org/feed/", "think_tank"),
+    ("Heritage Foundation", "https://www.heritage.org/rss/all-research.xml", "think_tank"),
+    ("AEI", "https://www.aei.org/feed/", "think_tank"),
+
+    # Defense / Security
+    ("Defense One", "https://www.defenseone.com/rss/", "established_newspaper"),
+    ("War on the Rocks", "https://warontherocks.com/feed/", "think_tank"),
 ]
 
 
