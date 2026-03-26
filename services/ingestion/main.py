@@ -1,9 +1,8 @@
 """
 Data Ingestion Worker — pulls from data sources, runs NLP pipeline, writes to Postgres.
-Triggered by Railway cron every 4 hours (0 */4 * * *).
 
 Orchestration flow:
-1. Pull from all data sources (GDELT, FRED, RSS, NewsData, etc.)
+1. Pull from all data sources (GDELT, FRED, RSS, NewsData, TheNewsAPI, etc.)
 2. NLP pipeline: entity extraction (spaCy), sentiment scoring
 3. Event classification: domain + severity
 4. Dedup incoming events against existing events in Postgres
@@ -28,7 +27,7 @@ from shared.database import get_db_session
 from shared.models import Event
 from shared.utils import setup_logging, get_initial_source_integrity
 
-# Source imports — Phase 1 (Day 1)
+# Source imports — Phase 1
 from services.ingestion.sources.gdelt import fetch_gdelt_events
 from services.ingestion.sources.fred import fetch_fred_events
 from services.ingestion.sources.rss_feeds import fetch_rss_events
@@ -44,6 +43,7 @@ from services.ingestion.sources.sec_edgar import fetch_sec_edgar_events
 from services.ingestion.sources.bls import fetch_bls_events
 from services.ingestion.sources.world_bank import fetch_world_bank_events
 from services.ingestion.sources.ofac import fetch_ofac_events
+from services.ingestion.sources.thenewsapi import fetch_thenewsapi_events
 
 # Pipeline imports
 from services.ingestion.pipeline.nlp import enrich_event_entities
@@ -87,6 +87,7 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
         "bls": "government_statement",
         "world_bank": "government_statement",
         "ofac": "government_statement",
+        "thenewsapi": "established_newspaper",
     }
 
     category = source_map.get(source, source)
@@ -104,15 +105,12 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
 
 
 async def _fetch_all_sources() -> List[Dict[str, Any]]:
-    """
-    Fetch events from all configured data sources.
-    Each source is run independently with error isolation.
-    """
+    """Fetch events from all configured data sources."""
     all_events: List[Dict[str, Any]] = []
     source_stats: Dict[str, int] = {}
 
     sources = [
-        # Phase 1 — Critical
+        # Phase 1
         ("GDELT", fetch_gdelt_events),
         ("FRED", fetch_fred_events),
         ("RSS", fetch_rss_events),
@@ -122,11 +120,12 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("ACLED", fetch_acled_events),
         ("Polymarket", fetch_polymarket_events),
         ("CFTC", fetch_cftc_events),
-        # Phase 2 — New sources
+        # Phase 2
         ("SEC_EDGAR", fetch_sec_edgar_events),
         ("BLS", fetch_bls_events),
         ("WorldBank", fetch_world_bank_events),
         ("OFAC", fetch_ofac_events),
+        ("TheNewsAPI", fetch_thenewsapi_events),
     ]
 
     for source_name, fetcher in sources:
@@ -217,9 +216,7 @@ async def run_async():
 
     stats = {
         "run_start": datetime.utcnow().isoformat(),
-        "sources_fetched": 0,
         "raw_events": 0,
-        "after_nlp": 0,
         "after_dedup": 0,
         "duplicates_removed": 0,
         "events_persisted": 0,
@@ -248,13 +245,12 @@ async def run_async():
                 enrich_event_entities(event)
             except Exception as e:
                 logger.debug(f"NLP enrichment error: {e}")
-        stats["after_nlp"] = len(raw_events)
 
         # Step 3: Classification (domain + severity)
         logger.info("STEP 3: Event classification...")
         classify_events_batch(raw_events)
 
-        # Step 4: Dedup + persist + extract claims (needs DB session)
+        # Step 4: Dedup + persist + extract claims
         logger.info("STEP 4: Dedup, persist, extract claims...")
         with get_db_session() as db:
             unique_events, dup_count = deduplicate_batch(raw_events, db)
