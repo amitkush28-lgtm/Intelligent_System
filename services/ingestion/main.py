@@ -28,7 +28,7 @@ from shared.database import get_db_session
 from shared.models import Event
 from shared.utils import setup_logging, get_initial_source_integrity
 
-# Source imports
+# Source imports — Phase 1 (Day 1)
 from services.ingestion.sources.gdelt import fetch_gdelt_events
 from services.ingestion.sources.fred import fetch_fred_events
 from services.ingestion.sources.rss_feeds import fetch_rss_events
@@ -38,6 +38,12 @@ from services.ingestion.sources.propublica import fetch_propublica_events
 from services.ingestion.sources.acled import fetch_acled_events
 from services.ingestion.sources.polymarket import fetch_polymarket_events
 from services.ingestion.sources.cftc import fetch_cftc_events
+
+# Source imports — Phase 2 (new)
+from services.ingestion.sources.sec_edgar import fetch_sec_edgar_events
+from services.ingestion.sources.bls import fetch_bls_events
+from services.ingestion.sources.world_bank import fetch_world_bank_events
+from services.ingestion.sources.ofac import fetch_ofac_events
 
 # Pipeline imports
 from services.ingestion.pipeline.nlp import enrich_event_entities
@@ -77,6 +83,10 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
         "acled": "established_newspaper",
         "polymarket": "verified_social_media",
         "cftc": "government_statement",
+        "sec_edgar": "government_statement",
+        "bls": "government_statement",
+        "world_bank": "government_statement",
+        "ofac": "government_statement",
     }
 
     category = source_map.get(source, source)
@@ -102,6 +112,7 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
     source_stats: Dict[str, int] = {}
 
     sources = [
+        # Phase 1 — Critical
         ("GDELT", fetch_gdelt_events),
         ("FRED", fetch_fred_events),
         ("RSS", fetch_rss_events),
@@ -111,6 +122,11 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("ACLED", fetch_acled_events),
         ("Polymarket", fetch_polymarket_events),
         ("CFTC", fetch_cftc_events),
+        # Phase 2 — New sources
+        ("SEC_EDGAR", fetch_sec_edgar_events),
+        ("BLS", fetch_bls_events),
+        ("WorldBank", fetch_world_bank_events),
+        ("OFAC", fetch_ofac_events),
     ]
 
     for source_name, fetcher in sources:
