@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: '\u2302' },
+  { href: '/newsletter', label: 'Newsletter', icon: '\uD83D\uDCF0' },
   { href: '/predictions', label: 'Predictions', icon: '\u25CE' },
   { href: '/agents', label: 'Agents', icon: '\u2726' },
   { href: '/debates', label: 'Debates', icon: '\u2694' },
@@ -59,7 +60,7 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-5 py-4 border-t border-slate-800/80">
-        <p className="text-[10px] text-slate-600 uppercase tracking-widest">v1.0 &middot; Phase 7</p>
+        <p className="text-[10px] text-slate-600 uppercase tracking-widest">v1.1 &middot; Phase 8</p>
       </div>
     </aside>
   );
