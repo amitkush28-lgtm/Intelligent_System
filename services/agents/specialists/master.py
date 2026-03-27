@@ -113,7 +113,7 @@ DECISION RELEVANCE:
             raw_response = await call_claude_sonnet(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=4096,
+                max_tokens=8192,
                 temperature=0.3,
             )
         except Exception as e:
