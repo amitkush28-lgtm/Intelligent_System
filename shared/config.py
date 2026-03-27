@@ -18,15 +18,17 @@ class Settings(BaseSettings):
     
     # LLM API Keys
     ANTHROPIC_API_KEY: str = ""
-    GOOGLE_API_KEY: str = ""  # Gemini API key (replaces OpenAI)
+    OPENAI_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""
     
     # Data Source API Keys
     FRED_API_KEY: str = ""
     NEWSDATA_API_KEY: str = ""
     TWELVE_DATA_API_KEY: str = ""
+    CONGRESS_API_KEY: str = ""
     
     # API Configuration
-    API_KEY: str = "changeme"  # Simple auth for Phase 1
+    API_KEY: str = "changeme"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     
@@ -34,10 +36,11 @@ class Settings(BaseSettings):
     API_URL: str = "http://api:8000"
     
     # LLM Model Configuration
-    # Using cheapest models for pipeline validation — upgrade later
-    CLAUDE_SONNET_MODEL: str = "claude-sonnet-4-20250514"
+    # COST MODE: Haiku for all agents (~$3-5/month at daily runs)
+    # QUALITY MODE: Switch CLAUDE_SONNET_MODEL to "claude-sonnet-4-20250514" (~$15-30/month)
+    CLAUDE_SONNET_MODEL: str = "claude-haiku-4-5-20251001"
     CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GPT4O_MODEL: str = "gpt-4o-mini"
     
     # Operational
     LOG_LEVEL: str = "INFO"
@@ -45,7 +48,7 @@ class Settings(BaseSettings):
     
     # Confidence capping
     MIN_EVIDENCE_INTEGRITY: float = 0.50
-    CONFIDENCE_CAP_MULTIPLIER: float = 0.40  # max pp change = integrity * multiplier * 100
+    CONFIDENCE_CAP_MULTIPLIER: float = 0.40
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 
