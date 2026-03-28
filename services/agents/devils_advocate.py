@@ -1,15 +1,18 @@
 """
-Devil's Advocate — Uses GPT-4o (different model bias = genuine adversarial tension)
+Devil's Advocate — Uses Gemini (different model bias = genuine adversarial tension)
 to challenge predictions when trigger conditions are met.
 
-Trigger conditions (from development brief):
-1. Confidence moved >5pp
-2. Confidence >60%
-3. Agrees with consensus
-4. Invokes historical analogy
-5. Single data point driving large shift
+Upgraded to specifically target cognitive biases:
+- Confirmation bias
+- Recency bias
+- Anchoring
+- Base rate neglect
+- Historical analogy abuse
+- Consensus herding
+- Geographic bias
+- Narrative bias
 
-The different model (GPT-4o vs Claude) creates genuine adversarial tension because
+The different model (Gemini vs Claude) creates genuine adversarial tension because
 each model has different training data biases and reasoning patterns.
 """
 
@@ -26,44 +29,58 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-DEVIL_ADVOCATE_SYSTEM_PROMPT = """You are a Devil's Advocate in a multi-agent intelligence system.
+DEVIL_ADVOCATE_SYSTEM_PROMPT = """You are a Devil's Advocate in a multi-agent intelligence prediction system.
 
-Your job is to CHALLENGE the primary analyst's prediction. You are not trying to be right — you are trying to find weaknesses in the analysis. You serve the system by preventing overconfidence, groupthink, and blind spots.
+Your job is to CHALLENGE the primary analyst's prediction by specifically hunting for cognitive biases and analytical weaknesses. You are not trying to be right — you are trying to PREVENT OVERCONFIDENCE, GROUPTHINK, and BLIND SPOTS.
 
-## YOUR MANDATE
-1. STEELMAN the opposing view: present the strongest possible case AGAINST the prediction
-2. Identify HIDDEN ASSUMPTIONS the analyst is making
-3. Check for ANCHORING to recent events or historical analogies that may not apply
-4. Look for MISSING EVIDENCE — what data would you need to see to support this confidence level?
-5. Check BASE RATE NEGLECT — is the analyst ignoring how rarely this type of event occurs?
-6. Identify INFORMATION CASCADE risk — is this prediction driven by a single source?
-7. Consider SECOND-ORDER EFFECTS the analyst may have missed
+## YOUR MANDATE — HUNT FOR THESE SPECIFIC BIASES
+
+1. CONFIRMATION BIAS: Is the analyst only citing evidence that supports their conclusion? What contradicting evidence are they ignoring or dismissing?
+
+2. RECENCY BIAS: Is this prediction over-weighted by the most recent events? Would the analyst have made the same prediction 3 months ago with different recent data?
+
+3. ANCHORING: Is the analyst anchored to a specific number, scenario, or historical reference point? What if that anchor is wrong?
+
+4. BASE RATE NEGLECT: How often does this type of event ACTUALLY occur historically? Is the analyst predicting something far more common or rare than base rates suggest?
+
+5. HISTORICAL ANALOGY ABUSE: Is the analyst drawing a parallel to a historical event? How is the current situation DIFFERENT from that analogy? (Every historical analogy breaks down on specifics.)
+
+6. CONSENSUS HERDING: Does this prediction agree with what most analysts/markets already believe? If so, where's the edge? The market has already priced consensus views.
+
+7. GEOGRAPHIC/CULTURAL BIAS: Is the analyst applying Western/American analytical frameworks to non-Western actors? Are deep motivational forces being ignored?
+
+8. NARRATIVE BIAS: Is the analyst fitting events into a pre-existing narrative rather than letting the data speak? Would the evidence support a different narrative equally well?
+
+9. SINGLE-SOURCE DEPENDENCY: Is this prediction resting heavily on one data point, one source, or one event? How robust is it to that source being wrong?
+
+10. TIMING OVERCONFIDENCE: Even if the direction is right, is the timeline realistic? Most geopolitical and technology predictions are directionally correct but far too early or late.
 
 ## RULES
-- Be specific and constructive, not generically contrarian
-- Cite specific weaknesses in the evidence chain
-- Propose concrete alternative scenarios
-- Suggest what evidence would change your mind
-- Rate the severity of each challenge (LOW/MEDIUM/HIGH/CRITICAL)
+- Be SPECIFIC and CONSTRUCTIVE, not generically contrarian
+- For each bias identified, cite the SPECIFIC weakness in the evidence chain
+- Propose at least one CONCRETE alternative scenario the analyst hasn't considered
+- Suggest what EVIDENCE would resolve each challenge
+- Rate each challenge severity: LOW | MEDIUM | HIGH | CRITICAL
+- Be willing to say the analysis is SOLID when it genuinely is (adjust confidence UP if warranted)
 
 ## OUTPUT FORMAT
 Respond with ONLY valid JSON:
 {
     "challenges": [
         {
-            "type": "hidden_assumption|base_rate_neglect|anchoring|missing_evidence|single_source|alternative_scenario|second_order",
+            "type": "confirmation_bias|recency_bias|anchoring|base_rate_neglect|historical_analogy|consensus_herding|geographic_bias|narrative_bias|single_source|timing_overconfidence|missing_evidence|alternative_scenario|second_order",
             "severity": "LOW|MEDIUM|HIGH|CRITICAL",
-            "challenge": "specific challenge text",
+            "challenge": "specific challenge text explaining the weakness",
             "evidence_needed": "what evidence would resolve this challenge"
         }
     ],
-    "alternative_scenario": "the strongest alternative scenario the analyst hasn't considered",
+    "alternative_scenario": "the strongest alternative scenario the analyst hasn't considered — make it specific and plausible, not just generically 'the opposite might happen'",
     "recommended_confidence_adjustment": -5,
-    "overall_assessment": "brief assessment of the prediction's robustness",
-    "strongest_weakness": "the single most important weakness in the analysis"
+    "overall_assessment": "brief assessment of the prediction's robustness — is this a solid prediction with minor issues, or fundamentally flawed?",
+    "strongest_weakness": "the single most important weakness — if the analyst could only address ONE thing, what should it be?"
 }
 
-The recommended_confidence_adjustment is in percentage points (e.g., -5 means reduce by 5pp, +3 means the analysis is actually underconfident by 3pp). Range: -30 to +10.
+The recommended_confidence_adjustment is in percentage points (e.g., -5 means reduce by 5pp, +3 means the analysis is actually stronger than stated). Range: -30 to +10.
 """
 
 
@@ -73,13 +90,6 @@ async def run_devil_advocate(
 ) -> Optional[Dict[str, Any]]:
     """
     Run a devil's advocate challenge against a prediction.
-
-    Args:
-        trigger: from check_devil_advocate_trigger(), contains prediction data and reasons
-        agent_analysis_summary: the primary agent's full analysis text
-
-    Returns:
-        Dict with challenge results, or None if GPT-4o call fails
     """
     agent = trigger.get("agent", "unknown")
     trigger_reasons = trigger.get("trigger_reasons", [])
@@ -95,11 +105,11 @@ async def run_devil_advocate(
         raw_response = await call_gpt4o(
             system_prompt=DEVIL_ADVOCATE_SYSTEM_PROMPT,
             user_message=user_message,
-            max_tokens=2048,
+            max_tokens=3072,
             temperature=0.4,
         )
     except Exception as e:
-        logger.warning(f"GPT-4o devil's advocate call failed: {e}")
+        logger.warning(f"Gemini devil's advocate call failed: {e}")
         logger.debug(traceback.format_exc())
         return None
 
@@ -113,7 +123,7 @@ async def run_devil_advocate(
             "overall_assessment": "Challenge produced but unparseable.",
         }
 
-    # Validate the adjustment is within bounds
+    # Validate the adjustment
     adj = parsed.get("recommended_confidence_adjustment", 0)
     try:
         adj = float(adj)
@@ -123,16 +133,26 @@ async def run_devil_advocate(
     parsed["recommended_confidence_adjustment"] = adj
 
     # Validate challenges
+    valid_types = {
+        "confirmation_bias", "recency_bias", "anchoring", "base_rate_neglect",
+        "historical_analogy", "consensus_herding", "geographic_bias", "narrative_bias",
+        "single_source", "timing_overconfidence", "missing_evidence",
+        "alternative_scenario", "second_order", "hidden_assumption",
+    }
     challenges = parsed.get("challenges", [])
     if isinstance(challenges, list):
         validated = []
         for c in challenges:
             if isinstance(c, dict) and c.get("challenge"):
-                # Ensure severity is valid
                 sev = c.get("severity", "MEDIUM")
                 if sev not in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
                     sev = "MEDIUM"
                 c["severity"] = sev
+                # Normalize type
+                c_type = c.get("type", "missing_evidence")
+                if c_type not in valid_types:
+                    c_type = "missing_evidence"
+                c["type"] = c_type
                 validated.append(c)
         parsed["challenges"] = validated
 
@@ -153,7 +173,6 @@ def _build_challenge_message(
     agent = trigger.get("agent", "unknown")
     reasons = trigger.get("trigger_reasons", [])
 
-    # Extract prediction details
     if trigger_type == "new_prediction":
         pred_data = trigger.get("prediction_data", {})
         claim = pred_data.get("claim", "N/A")
@@ -161,16 +180,28 @@ def _build_challenge_message(
         reasoning = pred_data.get("reasoning", "No reasoning provided")
         base_rate = pred_data.get("base_rate", "not specified")
         key_triggers = pred_data.get("key_triggers", [])
+        so_what = pred_data.get("so_what", "Not specified")
+        category = pred_data.get("category", "N/A")
 
         msg = f"""CHALLENGE THIS NEW PREDICTION from the {agent.upper()} agent:
 
 CLAIM: {claim}
 CONFIDENCE: {confidence:.0%}
+CATEGORY: {category}
 REASONING: {reasoning}
 BASE RATE: {base_rate}
 KEY TRIGGERS: {json.dumps(key_triggers)}
+SO WHAT (actionable guidance): {so_what}
 
 TRIGGER REASONS FOR THIS CHALLENGE: {', '.join(reasons)}
+
+SPECIFIC BIAS CHECKS TO PERFORM:
+1. Does the confidence level match the base rate? (base_rate_neglect check)
+2. Is the reasoning over-reliant on recent events? (recency_bias check)
+3. Is there a historical analogy being used? If so, how does today differ? (historical_analogy check)
+4. Is this what "everyone" already thinks? (consensus_herding check)
+5. What's the strongest evidence AGAINST this prediction? (confirmation_bias check)
+6. Is the timeline realistic? (timing_overconfidence check)
 """
 
     elif trigger_type == "confidence_shift":
@@ -186,7 +217,12 @@ OLD CONFIDENCE: {old_conf:.0%}
 NEW CONFIDENCE: {new_conf:.0%}
 MOVEMENT: {movement:.0f}pp
 
-TRIGGER REASONS FOR THIS CHALLENGE: {', '.join(reasons)}
+TRIGGER REASONS: {', '.join(reasons)}
+
+SPECIFIC CHECKS:
+1. Is this shift driven by a SINGLE new data point? (single_source check)
+2. Is the analyst ANCHORED to the previous confidence? (anchoring check)
+3. Is the shift justified by the evidence weight, or is it recency bias?
 """
     else:
         msg = f"""CHALLENGE from the {agent.upper()} agent:
@@ -200,7 +236,7 @@ TRIGGER REASONS: {', '.join(reasons)}
 """
 
     msg += """
-Produce your devil's advocate challenge. Be specific, cite evidence gaps, and propose the strongest alternative scenario. Respond with ONLY valid JSON."""
+Produce your devil's advocate challenge. Hunt specifically for the cognitive biases listed above. Be constructive — identify the specific weakness and suggest how to resolve it. Respond with ONLY valid JSON."""
 
     return msg
 
@@ -211,9 +247,7 @@ def compute_devil_impact(
 ) -> float:
     """
     Compute the actual impact of the devil's advocate on prediction confidence.
-
-    Returns the confidence adjustment in percentage points (can be negative or slightly positive).
-    The adjustment is moderated — we don't fully apply the devil's recommendation.
+    Returns confidence adjustment in percentage points.
     """
     adj = devil_result.get("recommended_confidence_adjustment", 0)
     try:
@@ -225,20 +259,19 @@ def compute_devil_impact(
     critical_count = sum(1 for c in challenges if c.get("severity") == "CRITICAL")
     high_count = sum(1 for c in challenges if c.get("severity") == "HIGH")
 
-    # Scale adjustment by severity of challenges
+    # Scale by severity
     severity_weight = 1.0
     if critical_count >= 2:
-        severity_weight = 1.5  # Amplify for critical challenges
+        severity_weight = 1.5
     elif critical_count == 1 or high_count >= 2:
         severity_weight = 1.2
     elif not challenges or all(c.get("severity") == "LOW" for c in challenges):
-        severity_weight = 0.5  # Dampen for only low-severity challenges
+        severity_weight = 0.5
 
-    # Apply moderation — don't fully trust devil's recommendation
+    # Moderation factor — don't fully trust devil's recommendation
     MODERATION_FACTOR = 0.6
     moderated = adj * MODERATION_FACTOR * severity_weight
 
-    # Cap the impact
     moderated = max(-20, min(5, moderated))
 
     return round(moderated, 1)
@@ -249,11 +282,7 @@ def format_debate_rounds(
     devil_result: Dict[str, Any],
     impact_pp: float,
 ) -> List[Dict[str, Any]]:
-    """
-    Format the debate into rounds for storage in the Debate model.
-
-    Returns list of round dicts for the `rounds` JSONB column.
-    """
+    """Format the debate into rounds for storage."""
     rounds = [
         {
             "round": 1,
@@ -262,7 +291,7 @@ def format_debate_rounds(
                 "text": agent_analysis_summary[:2000],
             },
             "devil": {
-                "agent": "gpt4o",
+                "agent": "gemini",
                 "challenges": devil_result.get("challenges", []),
                 "alternative_scenario": devil_result.get("alternative_scenario", ""),
                 "overall_assessment": devil_result.get("overall_assessment", ""),

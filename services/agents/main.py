@@ -8,7 +8,7 @@ manages prediction creation/updates, publishes analysis_complete to Redis.
 Also runs as daily cron (08:00 UTC) for comprehensive re-analysis.
 
 Agent execution order:
-1. 5 specialist agents (can run in any order, each independent)
+1. 6 specialist agents (can run in any order, each independent)
 2. Reality Check agent (web search validation of all new predictions)
 3. Devil's advocate challenges (triggered by specialist outputs)
 4. Master Strategist (runs AFTER all specialists, receives their outputs)
@@ -37,6 +37,7 @@ from shared.utils import (
 
 from services.agents.context_builder import build_agent_context
 from services.agents.output_parser import parse_agent_output
+from services.agents.prediction_validator import validate_prediction_batch
 from services.agents.devils_advocate import (
     run_devil_advocate, compute_devil_impact, format_debate_rounds,
 )
@@ -47,6 +48,7 @@ from services.agents.specialists.geopolitical import GeopoliticalAgent
 from services.agents.specialists.investor import InvestorAgent
 from services.agents.specialists.political import PoliticalAgent
 from services.agents.specialists.sentiment import SentimentAgent
+from services.agents.specialists.wildcard import WildCardAgent
 from services.agents.specialists.master import MasterAgent
 
 logger = setup_logging("agents")
@@ -59,13 +61,14 @@ ANALYSIS_COMPLETE_QUEUE = "analysis_complete"
 BRPOP_TIMEOUT = 10  # seconds
 MAX_CYCLES_PER_RUN = 5  # safety limit — don't run infinite cycles from queued events
 
-# Instantiate all agents
+# Instantiate all agents (6 specialists + master)
 SPECIALIST_AGENTS = [
     EconomistAgent(),
     GeopoliticalAgent(),
     InvestorAgent(),
     PoliticalAgent(),
     SentimentAgent(),
+    WildCardAgent(),
 ]
 
 MASTER_AGENT = MasterAgent()
@@ -308,7 +311,22 @@ async def _run_specialist(
         else:
             avg_integrity = 0.50  # Default when no claims available
 
-        # Persist new predictions
+        # VALIDATION GATE — filter predictions through quality checks
+        raw_predictions = output.get("new_predictions", [])
+        if raw_predictions:
+            accepted, rejected, val_warnings = validate_prediction_batch(
+                raw_predictions, agent_name, max_predictions=8
+            )
+            output["new_predictions"] = accepted
+            output["_rejected_predictions"] = rejected
+            output["_validation_warnings"] = val_warnings
+
+            if rejected:
+                logger.info(
+                    f"[{agent_name}] Prediction validator rejected {len(rejected)}/{len(raw_predictions)} predictions"
+                )
+
+        # Persist validated predictions
         for pred_data in output.get("new_predictions", []):
             _create_prediction(db, agent_name, pred_data)
 
