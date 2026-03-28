@@ -1,7 +1,20 @@
 """
-Newsletter routes.
+Newsletter routes — upgraded with full Intelligence Brief structure.
+
 GET /newsletter/latest — get the most recent newsletter
 POST /newsletter/generate — generate a new newsletter via Master Strategist
+
+Newsletter structure:
+1. Track Record (rolling 30-day scorecard)
+2. The One Thing That Matters Today
+3. Key Developments (3 argumentative sections with "WHAT TO DO")
+4. Convergence Alerts
+5. New Predictions
+6. Prediction Scorecard
+7. Contrarian Corner
+8. What We're Watching
+9. Portfolio Implications
+10. Travel & Safety Advisory
 """
 
 import json
@@ -11,7 +24,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import desc, and_, func
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
@@ -25,7 +38,7 @@ settings = get_settings()
 
 router = APIRouter(prefix="/newsletter", tags=["newsletter"])
 
-# In-memory store for latest newsletter (simple for Phase 1)
+# In-memory store for latest newsletter
 _latest_newsletter = {"content": None, "generated_at": None, "generating": False}
 
 
@@ -37,48 +50,139 @@ class NewsletterResponse(BaseModel):
 
 NEWSLETTER_SYSTEM_PROMPT = """You are the Master Strategist of a multi-agent intelligence prediction system, writing a daily intelligence newsletter.
 
-Write in the style of a senior intelligence analyst producing a morning briefing for policymakers and institutional investors. Your tone should be:
-- Authoritative but not arrogant
-- Specific and evidence-based, not vague
-- Willing to make bold calls with clear reasoning
-- Written like the best opinion pieces in the Financial Times or Foreign Affairs
+## YOUR VOICE
+Think: a brilliant friend who happens to be an ex-intelligence analyst, now running a macro hedge fund. They're having a drink with you and telling you what's REALLY going on. Not academic. Not breathless. Not hedged into meaninglessness.
 
-NEWSLETTER STRUCTURE:
+Specific voice guidelines:
+- CONFIDENT but not cocky: "We think X will happen (65%)" not "X is definitely happening"
+- DIRECT, not diplomatic: "The Fed made a mistake" not "questions remain about the efficacy"
+- SPECIFIC, not vague: "$3,400 by September" not "upward price pressure"
+- HONEST about uncertainty: "We genuinely don't know" is acceptable when true
+- EXPLAIN THE WHY: Walk through the causal logic so readers learn to think this way
+- OCCASIONAL IRREVERENCE: A well-placed blunt observation keeps readers engaged
 
-# Intelligence Brief — [Today's Date]
+BANNED PHRASES (never use these):
+- "it remains to be seen"
+- "only time will tell"
+- "a complex and evolving situation"
+- "stakeholders should monitor developments"
+- "cautious optimism"
+- "amid growing concerns"
 
-## Executive Summary
-2-3 sentences capturing the single most important development and its implications.
+## NEWSLETTER STRUCTURE — FOLLOW THIS EXACTLY
 
-## Key Developments
-For each major theme (3-5 themes):
-### [Theme Title]
-Write 2-4 paragraphs as a mini opinion piece:
-- What happened (specific events, data points, sources)
-- Why it matters (structural analysis, not just surface description)
-- Where consensus is wrong (your contrarian edge)
-- What to watch next (specific triggers and timelines)
+# THE INTELLIGENCE BRIEF — [Today's Date]
 
-## Active Predictions
-List the most important active predictions with current confidence levels and brief status updates. Group by domain.
+## 📊 TRACK RECORD
+[Use the scorecard data provided. Show: predictions resolved, hit rate, Brier score. 
+If no data yet, say "System is in calibration phase — first scores expected in 30 days."]
 
-## Convergence Alerts
-Where multiple agents are flagging the same risk from different angles — these are the highest-conviction signals.
+## 🎯 THE ONE THING THAT MATTERS TODAY
+[2-3 sentences MAXIMUM. The single most important signal the system detected. 
+What happened, why it matters, and what happens next. This is the hook — 
+if someone reads nothing else, this must be worth their time.]
 
-## Contrarian Corner
-Your most controversial or non-consensus view, argued persuasively. This is where the system adds the most value.
+## 📝 KEY DEVELOPMENTS
+[EXACTLY 3 sections. Each is a MINI OPINION PIECE — argumentative, not descriptive.
+Each section follows this pattern:]
 
-## What We're Watching
-3-5 specific events or data releases in the next 7 days that could shift the analysis.
+### [Argumentative Headline — a THESIS, not a summary]
+[3-5 paragraphs. Not "what happened" but "what this MEANS." Trace the causal chain
+through cascading consequences. Name specific numbers, dates, entities. 
+End with specific implications.]
 
-Write the full newsletter in markdown format. Be specific, be bold, be useful."""
+→ **WHAT TO DO:** [1-2 sentences of specific, actionable guidance]
+
+## 🔴 CONVERGENCE ALERTS
+[Only include if 3+ agents flagged the same risk from different angles.
+For each alert: which agents, what signal from each, synthesized prediction with confidence,
+and what to do about it. If no convergence this cycle, omit this section entirely.]
+
+## 🔮 NEW PREDICTIONS
+[List each new prediction with: claim, confidence %, deadline, category emoji.
+Group by category. Maximum 6-8 predictions — quality over quantity.]
+
+## ✅ PREDICTION SCORECARD
+[Recently resolved predictions (last 7 days) with outcomes.
+Active high-conviction predictions (>70%) with status updates.
+Format: ✓ for correct, ✗ for incorrect, • for active.]
+
+## 😈 CONTRARIAN CORNER
+[The Devil's Advocate's best argument this week. What's one thing "everyone knows"
+that might be wrong? Written as a provocative 2-3 paragraph argument.
+This section should make the reader uncomfortable in a productive way.]
+
+## 👁️ WHAT WE'RE WATCHING
+[3-5 specific events or data releases in the next 7 days.
+For each: date, what it is, why it matters, what outcome would be bullish vs bearish.]
+
+## 💼 PORTFOLIO IMPLICATIONS
+[Net positioning recommendation based on today's analysis.
+Specific positions to add/reduce/hedge. Key price levels to watch.
+If no market-moving analysis today, keep brief.]
+
+## ✈️ TRAVEL & SAFETY ADVISORY
+[Any new city/region risk changes. Flight route disruptions to watch.
+Only include if relevant — don't force this section if nothing has changed.]
+
+---
+
+Write the FULL newsletter in markdown format. 8-12 minute read maximum.
+Lead with JUDGMENT, not summary. Every section must have a "do this."
+"""
 
 
 def _build_newsletter_context(db: Session) -> str:
-    """Build context from current system state for newsletter generation."""
+    """Build comprehensive context from current system state."""
     parts = []
 
-    # Recent events (last 24h)
+    # --- Track record data ---
+    parts.append("## SYSTEM SCORECARD DATA")
+
+    # Count resolved predictions in last 30 days
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    resolved = (
+        db.query(Prediction)
+        .filter(
+            Prediction.status.in_(["RESOLVED_TRUE", "RESOLVED_FALSE"]),
+            Prediction.resolved_date >= thirty_days_ago.date(),
+        )
+        .all()
+    )
+
+    correct = sum(1 for p in resolved if p.status == "RESOLVED_TRUE")
+    total_resolved = len(resolved)
+    hit_rate = (correct / total_resolved * 100) if total_resolved > 0 else 0
+    brier_scores = [p.brier_score for p in resolved if p.brier_score is not None]
+    avg_brier = sum(brier_scores) / len(brier_scores) if brier_scores else None
+
+    parts.append(f"Predictions resolved (30 days): {total_resolved}")
+    parts.append(f"Correct: {correct} ({hit_rate:.0f}%)")
+    if avg_brier is not None:
+        parts.append(f"Average Brier Score: {avg_brier:.3f}")
+    else:
+        parts.append("Brier Score: Not yet available (need more resolved predictions)")
+
+    # Recently resolved (last 7 days)
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    recently_resolved = (
+        db.query(Prediction)
+        .filter(
+            Prediction.status.in_(["RESOLVED_TRUE", "RESOLVED_FALSE"]),
+            Prediction.resolved_date >= seven_days_ago.date(),
+        )
+        .order_by(Prediction.resolved_date.desc())
+        .limit(10)
+        .all()
+    )
+    if recently_resolved:
+        parts.append("\nRecently Resolved (last 7 days):")
+        for p in recently_resolved:
+            outcome = "✓ TRUE" if p.status == "RESOLVED_TRUE" else "✗ FALSE"
+            brier = f" (Brier: {p.brier_score:.2f})" if p.brier_score else ""
+            parts.append(f"  {outcome} [{p.agent}] {p.current_confidence:.0%}: {p.claim[:150]}{brier}")
+
+    # --- Recent events (last 24h) ---
     cutoff = datetime.utcnow() - timedelta(hours=24)
     events = (
         db.query(Event)
@@ -88,12 +192,12 @@ def _build_newsletter_context(db: Session) -> str:
         .all()
     )
     if events:
-        parts.append("## RECENT EVENTS (last 24h)")
-        for e in events[:30]:
+        parts.append("\n## RECENT EVENTS (last 24h)")
+        for e in events[:40]:
             severity_tag = f"[{e.severity.upper()}]" if e.severity else ""
-            parts.append(f"- {severity_tag} [{e.domain}] {e.source}: {(e.raw_text or '')[:200]}")
+            parts.append(f"- {severity_tag} [{e.domain}] {e.source}: {(e.raw_text or '')[:250]}")
 
-    # Active predictions with reasoning
+    # --- Active predictions with reasoning ---
     predictions = (
         db.query(Prediction)
         .filter(Prediction.status == "ACTIVE")
@@ -104,8 +208,11 @@ def _build_newsletter_context(db: Session) -> str:
     if predictions:
         parts.append("\n## ACTIVE PREDICTIONS")
         for p in predictions:
-            parts.append(f"- [{p.agent}] {p.current_confidence:.0%}: {p.claim}")
-            # Get the initial reasoning
+            deadline = ""
+            if p.time_condition_end:
+                deadline = f" (deadline: {p.time_condition_end})"
+            parts.append(f"- [{p.agent}] {p.current_confidence:.0%}{deadline}: {p.claim[:200]}")
+            # Get initial reasoning
             trail = (
                 db.query(ConfidenceTrail)
                 .filter(ConfidenceTrail.prediction_id == p.id)
@@ -115,7 +222,14 @@ def _build_newsletter_context(db: Session) -> str:
             if trail and trail.reasoning:
                 parts.append(f"  Reasoning: {trail.reasoning[:300]}")
 
-    # Recent debates
+    # --- High-conviction predictions (>70%) for scorecard ---
+    high_conv = [p for p in (predictions or []) if p.current_confidence >= 0.70]
+    if high_conv:
+        parts.append("\n## HIGH-CONVICTION PREDICTIONS (>70%)")
+        for p in high_conv[:10]:
+            parts.append(f"- [{p.agent}] {p.current_confidence:.0%}: {p.claim[:200]}")
+
+    # --- Recent debates (contrarian corner material) ---
     debates = (
         db.query(Debate)
         .order_by(Debate.created_at.desc())
@@ -123,17 +237,22 @@ def _build_newsletter_context(db: Session) -> str:
         .all()
     )
     if debates:
-        parts.append("\n## RECENT DEBATES")
+        parts.append("\n## RECENT DEVIL'S ADVOCATE DEBATES")
         for d in debates:
-            parts.append(f"- [{d.agent}] {d.trigger_reason}")
+            parts.append(f"- [{d.agent}] Trigger: {d.trigger_reason}")
             if d.rounds and isinstance(d.rounds, list):
                 for r in d.rounds[:1]:
-                    if isinstance(r, dict):
-                        if r.get("devil"):
-                            devil_text = r["devil"] if isinstance(r["devil"], str) else r["devil"].get("text", "")
-                            parts.append(f"  Devil's advocate: {devil_text[:200]}")
+                    if isinstance(r, dict) and r.get("devil"):
+                        devil = r["devil"]
+                        if isinstance(devil, dict):
+                            assessment = devil.get("overall_assessment", "")
+                            strongest = devil.get("strongest_weakness", "")
+                            alt = devil.get("alternative_scenario", "")
+                            parts.append(f"  Assessment: {assessment[:200]}")
+                            parts.append(f"  Strongest weakness: {strongest[:200]}")
+                            parts.append(f"  Alternative scenario: {alt[:200]}")
 
-    # Weak signals
+    # --- Weak signals ---
     signals = (
         db.query(WeakSignal)
         .order_by(WeakSignal.detected_at.desc())
@@ -145,18 +264,18 @@ def _build_newsletter_context(db: Session) -> str:
         for s in signals:
             parts.append(f"- [{s.strength}] {s.signal[:200]}")
 
-    # Key notes
+    # --- Key analyst notes ---
     notes = (
         db.query(Note)
-        .filter(Note.type.in_(["key_signal", "counter_signal", "analysis"]))
+        .filter(Note.type.in_(["key_signal", "counter_signal", "analysis", "blind_spot", "convergence"]))
         .order_by(Note.date.desc())
-        .limit(10)
+        .limit(15)
         .all()
     )
     if notes:
         parts.append("\n## KEY ANALYST NOTES")
         for n in notes:
-            parts.append(f"- [{n.type}] {n.text[:200]}")
+            parts.append(f"- [{n.type}] {n.text[:250]}")
 
     return "\n".join(parts)
 
@@ -170,11 +289,24 @@ async def _generate_newsletter(db: Session):
         context = _build_newsletter_context(db)
         today = datetime.utcnow().strftime("%B %d, %Y")
 
-        user_message = f"""Today is {today}. Generate the daily intelligence newsletter based on the following system state:
+        user_message = f"""Today is {today}. Generate the daily intelligence newsletter.
 
+SYSTEM STATE:
 {context}
 
-Write the complete newsletter in markdown. Be specific, cite data points and events, make bold analytical calls with clear reasoning. This should read like the morning briefing a senior policymaker looks forward to reading."""
+INSTRUCTIONS:
+1. Follow the newsletter structure EXACTLY as specified in your system prompt.
+2. Lead with JUDGMENT, not summary — the reader knows what happened; they want to know what it MEANS.
+3. Every Key Development section must have an argumentative headline (a thesis, not a description).
+4. Every section must end with actionable guidance (the "WHAT TO DO").
+5. Include the Track Record scorecard using the data provided.
+6. For the Prediction Scorecard, use the recently resolved and high-conviction data provided.
+7. For Contrarian Corner, use the Devil's Advocate debate material provided.
+8. Be SPECIFIC — cite actual numbers, dates, prices, entities.
+9. Respect the 8-12 minute read limit — be concise and cut anything that doesn't add value.
+10. If data is thin in any section, acknowledge it briefly and move on — don't pad.
+
+Write the complete newsletter in markdown."""
 
         response = await call_claude_sonnet(
             system_prompt=NEWSLETTER_SYSTEM_PROMPT,
@@ -222,7 +354,6 @@ async def generate_newsletter(
     if _latest_newsletter["generating"]:
         return NewsletterResponse(status="generating")
 
-    # Run in background since it takes 30-60 seconds
     background_tasks.add_task(_generate_newsletter, db)
 
     return NewsletterResponse(
