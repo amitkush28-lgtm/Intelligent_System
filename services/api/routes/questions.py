@@ -525,6 +525,12 @@ Using the research above, produce your analysis. You MUST respond with ONLY vali
             else:
                 q.overall_status = "green"
 
+            # Delete old assumptions before creating new ones (safe for re-analysis)
+            db.query(QuestionAssumption).filter(
+                QuestionAssumption.question_id == question_id
+            ).delete()
+            db.flush()
+
             # Create assumption records
             for a_data in assumptions_data:
                 a_num = a_data.get("assumption_number", 0)

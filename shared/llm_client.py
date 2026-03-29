@@ -1,8 +1,12 @@
 """
 LLM client wrappers for Claude (agents), Gemini (devil's advocate), and web search.
 All services use these instead of direct API calls.
+
+IMPORTANT: All Claude calls use AsyncAnthropic to avoid blocking the FastAPI event loop.
+Gemini calls are wrapped in asyncio.to_thread since the google-genai SDK is synchronous.
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -14,14 +18,14 @@ from shared.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_anthropic_client: Optional[anthropic.Anthropic] = None
+_async_anthropic_client: Optional[anthropic.AsyncAnthropic] = None
 
 
-def _get_anthropic() -> anthropic.Anthropic:
-    global _anthropic_client
-    if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    return _anthropic_client
+def _get_async_anthropic() -> anthropic.AsyncAnthropic:
+    global _async_anthropic_client
+    if _async_anthropic_client is None:
+        _async_anthropic_client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    return _async_anthropic_client
 
 
 async def call_claude_sonnet(
@@ -32,8 +36,8 @@ async def call_claude_sonnet(
 ) -> str:
     """Primary agent analysis via Claude (Sonnet or Haiku depending on config)."""
     try:
-        client = _get_anthropic()
-        response = client.messages.create(
+        client = _get_async_anthropic()
+        response = await client.messages.create(
             model=settings.CLAUDE_SONNET_MODEL,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -57,8 +61,8 @@ async def call_claude_haiku(
 ) -> str:
     """Bulk operations via Claude Haiku."""
     try:
-        client = _get_anthropic()
-        response = client.messages.create(
+        client = _get_async_anthropic()
+        response = await client.messages.create(
             model=settings.CLAUDE_HAIKU_MODEL,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -80,8 +84,9 @@ async def call_devil_advocate(
     max_tokens: int = 4096,
     temperature: float = 0.4,
 ) -> str:
-    """Devil's advocate via Gemini (different model = genuine adversarial tension)."""
-    try:
+    """Devil's advocate via Gemini (different model = genuine adversarial tension).
+    Wrapped in asyncio.to_thread since google-genai SDK is synchronous."""
+    def _sync_call():
         from google import genai
         client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         response = client.models.generate_content(
@@ -89,6 +94,9 @@ async def call_devil_advocate(
             contents=f"{system_prompt}\n\n{user_message}",
         )
         return response.text
+
+    try:
+        return await asyncio.to_thread(_sync_call)
     except Exception as e:
         logger.error(f"Gemini API error: {e}")
         raise
@@ -111,8 +119,8 @@ async def call_claude_with_web_search(
 ) -> str:
     """Claude with web search tool enabled."""
     try:
-        client = _get_anthropic()
-        response = client.messages.create(
+        client = _get_async_anthropic()
+        response = await client.messages.create(
             model=settings.CLAUDE_SONNET_MODEL,
             max_tokens=max_tokens,
             system=system_prompt,
