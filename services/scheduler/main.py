@@ -176,7 +176,7 @@ async def _generate_newsletter(cadence: str = "daily"):
     from shared.llm_client import call_claude_sonnet
     from shared.database import get_db_session
     from shared.models import Prediction, Event, ConfidenceTrail, WeakSignal, Debate, Note
-    from services.api.routes.newsletter import (
+    from shared.newsletter_prompts import (
         DAILY_SYSTEM_PROMPT,
         WEEKLY_SYSTEM_PROMPT,
         MONTHLY_SYSTEM_PROMPT,
