@@ -424,7 +424,8 @@ async def _analyze_question(
     logger.info(f"Starting analysis for Living Question {question_id}: {question_text[:80]}")
 
     try:
-        user_message = f"""Analyze this Living Question thoroughly. Use web search to get current data.
+        # STEP 1: Research phase — web search for current data (free-form text output)
+        research_prompt = f"""Research this question thoroughly using web search. Gather current data, statistics, and recent developments.
 
 QUESTION: {question_text}
 {"CONTEXT: " + context if context else ""}
@@ -432,26 +433,45 @@ CATEGORY: {category or "GENERAL"}
 
 Today's date: {datetime.utcnow().strftime('%Y-%m-%d')}
 
-Instructions:
-1. Search the web for current information relevant to this question
-2. Form a clear thesis with a specific verdict (BULLISH/BEARISH/NEUTRAL/MIXED)
-3. Decompose into 4-7 specific, falsifiable assumptions
-4. For each assumption, define concrete tripwires that would change the status
-5. Provide monitoring keywords for automated event matching
-6. Give a specific, actionable recommendation
-7. Consider ALL angles: economic, geopolitical, market, political, sentiment, technology/climate
+Search for:
+- Current market data, prices, and trends relevant to this question
+- Recent news and developments (last 30 days)
+- Expert opinions and analyst forecasts
+- Key risks and opportunities
+- Data from multiple perspectives: economic, geopolitical, market, political, sentiment, technology
 
-Be SPECIFIC. Use actual numbers, dates, entities. This analysis will be continuously monitored.
+Provide a comprehensive research brief with specific numbers, dates, and sources."""
 
-Respond with ONLY valid JSON."""
-
-        response = await call_claude_with_web_search(
-            system_prompt=QUESTION_ANALYSIS_SYSTEM_PROMPT,
-            user_message=user_message,
+        research_response = await call_claude_with_web_search(
+            system_prompt="You are a research analyst gathering current data for an intelligence system. Be thorough and specific. Include actual numbers, dates, and data points.",
+            user_message=research_prompt,
             max_tokens=8192,
         )
 
-        analysis = parse_structured_json(response)
+        logger.info(f"Research phase complete for {question_id}: {len(research_response)} chars")
+
+        # STEP 2: Analysis phase — clean JSON generation from research (no web search)
+        analysis_message = f"""Based on the following research, produce a structured analysis of this Living Question.
+
+QUESTION: {question_text}
+{"CONTEXT: " + context if context else ""}
+CATEGORY: {category or "GENERAL"}
+
+RESEARCH DATA:
+{research_response[:6000]}
+
+Today's date: {datetime.utcnow().strftime('%Y-%m-%d')}
+
+Using the research above, produce your analysis. You MUST respond with ONLY valid JSON — no markdown, no explanation, no text before or after the JSON object."""
+
+        json_response = await call_claude_sonnet(
+            system_prompt=QUESTION_ANALYSIS_SYSTEM_PROMPT,
+            user_message=analysis_message,
+            max_tokens=4096,
+            temperature=0.2,
+        )
+
+        analysis = parse_structured_json(json_response)
         if not analysis:
             logger.error(f"Failed to parse analysis for {question_id}")
             with get_db_session() as db:
