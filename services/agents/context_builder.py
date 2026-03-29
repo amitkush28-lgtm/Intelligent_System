@@ -34,8 +34,8 @@ AGENT_DOMAINS = {
     "investor": ["market"],
     "political": ["political"],
     "sentiment": ["sentiment"],
-    "wildcard": ["economic", "geopolitical", "market", "political", "sentiment"],  # Wild Card sees everything
-    "master": ["economic", "geopolitical", "market", "political", "sentiment"],
+    "wildcard": ["economic", "geopolitical", "market", "political", "sentiment", "technology", "health"],  # Wild Card sees everything
+    "master": ["economic", "geopolitical", "market", "political", "sentiment", "technology", "health"],
 }
 
 # Maps agents to domains they should receive cross-domain signals from
@@ -45,7 +45,7 @@ CROSS_DOMAIN_MAP = {
     "investor": ["economic", "geopolitical", "political", "sentiment"],
     "political": ["economic", "geopolitical", "sentiment"],
     "sentiment": ["geopolitical", "political", "economic"],
-    "wildcard": ["economic", "geopolitical", "market", "political", "sentiment"],  # sees all cross-domain
+    "wildcard": ["economic", "geopolitical", "market", "political", "sentiment", "technology", "health"],  # sees all cross-domain
     "master": [],  # master gets everything directly
 }
 

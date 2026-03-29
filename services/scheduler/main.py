@@ -41,7 +41,7 @@ async def _run_full_pipeline():
     logger.info(f"Timestamp: {datetime.utcnow().isoformat()}")
     logger.info("=" * 60)
 
-    logger.info("STEP 1/5: Running data ingestion...")
+    logger.info("STEP 1/7: Running data ingestion...")
     try:
         from services.ingestion.main import run_async as run_ingestion
         await run_ingestion()
@@ -50,7 +50,18 @@ async def _run_full_pipeline():
 
     await asyncio.sleep(5)
 
-    logger.info("STEP 2/5: Running agent analysis...")
+    logger.info("STEP 2/7: Running Living Questions daily monitoring...")
+    try:
+        from services.agents.question_monitor import run_daily_monitoring
+        monitor_stats = await run_daily_monitoring()
+        logger.info(
+            f"Question monitor: {monitor_stats.get('evidence_logged', 0)} evidence logged, "
+            f"{monitor_stats.get('status_changes', 0)} status changes"
+        )
+    except Exception as e:
+        logger.error(f"Question monitoring failed: {e}")
+
+    logger.info("STEP 3/7: Running agent analysis...")
     try:
         from services.agents.main import run_analysis_cycle
         stats = await run_analysis_cycle()
@@ -58,7 +69,7 @@ async def _run_full_pipeline():
     except Exception as e:
         logger.error(f"Agent analysis failed: {e}")
 
-    logger.info("STEP 3/5: Running feedback cycle...")
+    logger.info("STEP 4/7: Running feedback cycle...")
     try:
         from services.feedback.scorer import run_scoring_cycle
         run_scoring_cycle()
@@ -67,14 +78,14 @@ async def _run_full_pipeline():
     except Exception as e:
         logger.error(f"Feedback failed: {e}")
 
-    logger.info("STEP 4/5: Running weak signal scan...")
+    logger.info("STEP 5/7: Running weak signal scan...")
     try:
         from services.signals.main import run_async as run_signals
         await run_signals()
     except Exception as e:
         logger.error(f"Signals failed: {e}")
 
-    logger.info("STEP 5/5: Generating newsletter...")
+    logger.info("STEP 6/7: Generating newsletter...")
     try:
         newsletter_md = await _generate_newsletter()
         if newsletter_md:
@@ -83,6 +94,21 @@ async def _run_full_pipeline():
                 _send_email(pdf_path, newsletter_md)
     except Exception as e:
         logger.error(f"Newsletter failed: {e}")
+
+    # Weekly trend tracker — runs on Sundays only
+    if datetime.utcnow().weekday() == 6:  # Sunday
+        logger.info("STEP 7/7: Running weekly Trend Tracker...")
+        try:
+            from services.agents.trend_tracker import run_weekly_trend_analysis
+            trend_stats = await run_weekly_trend_analysis()
+            logger.info(
+                f"Trend Tracker: {trend_stats.get('variables_analyzed', 0)} variables analyzed, "
+                f"accelerating: {trend_stats.get('accelerating', [])}"
+            )
+        except Exception as e:
+            logger.error(f"Trend Tracker failed: {e}")
+    else:
+        logger.info("STEP 7/7: Trend Tracker skipped (runs Sundays only)")
 
     logger.info("=" * 60)
     logger.info("DAILY PIPELINE COMPLETE")

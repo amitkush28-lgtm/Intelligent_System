@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Multi-Agent Intelligence System",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -65,6 +65,8 @@ from services.api.routes.events import router as events_router
 from services.api.routes.chat import router as chat_router
 from services.api.routes.trigger import router as trigger_router
 from services.api.routes.newsletter import router as newsletter_router
+from services.api.routes.questions import router as questions_router
+from services.api.routes.trends import router as trends_router
 
 app.include_router(predictions_router)
 app.include_router(agents_router)
@@ -77,3 +79,5 @@ app.include_router(events_router)
 app.include_router(chat_router)
 app.include_router(trigger_router)
 app.include_router(newsletter_router)
+app.include_router(questions_router)
+app.include_router(trends_router)

@@ -45,6 +45,11 @@ from services.ingestion.sources.world_bank import fetch_world_bank_events
 from services.ingestion.sources.ofac import fetch_ofac_events
 from services.ingestion.sources.thenewsapi import fetch_thenewsapi_events
 
+# Source imports — Phase 3 (new data sources)
+from services.ingestion.sources.google_trends import fetch_google_trends_events
+from services.ingestion.sources.arxiv import fetch_arxiv_events
+from services.ingestion.sources.metaculus import fetch_metaculus_events
+
 # Pipeline imports
 from services.ingestion.pipeline.nlp import enrich_event_entities
 from services.ingestion.pipeline.classifier import classify_events_batch
@@ -88,6 +93,12 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
         "world_bank": "government_statement",
         "ofac": "government_statement",
         "thenewsapi": "established_newspaper",
+        # Phase 3
+        "google_trends": "verified_social_media",
+        "arxiv": "government_statement",  # Academic/peer-reviewed
+        "metaculus": "verified_social_media",
+        "manifold": "verified_social_media",
+        "trend_tracker": "established_newspaper",  # Internal analysis
     }
 
     category = source_map.get(source, source)
@@ -126,6 +137,10 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("WorldBank", fetch_world_bank_events),
         ("OFAC", fetch_ofac_events),
         ("TheNewsAPI", fetch_thenewsapi_events),
+        # Phase 3 — New data sources
+        ("GoogleTrends", fetch_google_trends_events),
+        ("ArXiv", fetch_arxiv_events),
+        ("Metaculus", fetch_metaculus_events),
     ]
 
     for source_name, fetcher in sources:
