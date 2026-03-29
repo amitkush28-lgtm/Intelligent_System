@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: '/predictions', label: 'Predictions', icon: '\u25CE' },
   { href: '/agents', label: 'Agents', icon: '\u2726' },
   { href: '/debates', label: 'Debates', icon: '\u2694' },
+  { href: '/questions', label: 'Questions', icon: '\u2753' },
   { href: '/signals', label: 'Signals', icon: '\u26A0' },
   { href: '/decisions', label: 'Decisions', icon: '\u2691' },
   { href: '/chat', label: 'Chat', icon: '\u2709' },

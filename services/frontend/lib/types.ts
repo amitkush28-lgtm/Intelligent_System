@@ -243,6 +243,72 @@ export interface DecisionResponse {
 }
 
 // ============================================
+// LIVING QUESTIONS
+// ============================================
+
+export type QuestionStatus = 'analyzing' | 'active' | 'paused' | 'resolved' | 'archived';
+export type TrafficLight = 'green' | 'yellow' | 'red';
+export type ThesisVerdict = 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'MIXED';
+
+export interface QuestionAssumptionResponse {
+  id: string;
+  assumption_text: string;
+  assumption_number: number;
+  status: TrafficLight;
+  confidence: number | null;
+  green_to_yellow_trigger: string | null;
+  yellow_to_red_trigger: string | null;
+  supporting_evidence_count: number;
+  challenging_evidence_count: number;
+  current_assessment: string | null;
+  keywords: string[] | null;
+}
+
+export interface QuestionEvidenceResponse {
+  id: number;
+  assumption_id: string | null;
+  evidence_type: string;
+  evidence_summary: string;
+  impact_level: string | null;
+  source: string | null;
+  triggered_status_change: boolean;
+  detected_at: string | null;
+  agent_that_flagged: string | null;
+}
+
+export interface QuestionSummaryResponse {
+  id: string;
+  question: string;
+  category: string | null;
+  thesis_verdict: ThesisVerdict | null;
+  overall_confidence: number | null;
+  overall_status: TrafficLight | null;
+  thesis_summary: string | null;
+  status: QuestionStatus;
+  created_at: string | null;
+  last_analyzed_at: string | null;
+  next_review_date: string | null;
+  assumption_count: number;
+  evidence_count: number;
+  tags: string[] | null;
+}
+
+export interface QuestionDetailResponse extends QuestionSummaryResponse {
+  recommendation: string | null;
+  agent_perspectives: Record<string, string> | null;
+  assumptions: QuestionAssumptionResponse[];
+  recent_evidence: QuestionEvidenceResponse[];
+}
+
+export interface QuestionCreateRequest {
+  question: string;
+  context?: string;
+  category?: string;
+  priority?: string;
+  tags?: string[];
+}
+
+// ============================================
 // GENERIC
 // ============================================
 

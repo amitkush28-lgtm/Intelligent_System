@@ -14,6 +14,10 @@ import {
   ClaimVerificationResponse,
   EventResponse,
   DecisionResponse,
+  QuestionSummaryResponse,
+  QuestionDetailResponse,
+  QuestionCreateRequest,
+  QuestionEvidenceResponse,
 } from './types';
 
 const API_URL =
@@ -209,6 +213,61 @@ export async function getDecisions(params?: {
   const qs = sp.toString();
   return apiFetch<PaginatedResponse<DecisionResponse>>(
     `/decisions${qs ? `?${qs}` : ''}`
+  );
+}
+
+// ============================================
+// LIVING QUESTIONS
+// ============================================
+
+export async function getQuestions(params?: {
+  status?: string;
+}): Promise<QuestionSummaryResponse[]> {
+  const sp = new URLSearchParams();
+  if (params?.status) sp.set('status', params.status);
+  const qs = sp.toString();
+  return apiFetch<QuestionSummaryResponse[]>(
+    `/questions${qs ? `?${qs}` : ''}`
+  );
+}
+
+export async function getQuestion(id: string): Promise<QuestionDetailResponse> {
+  return apiFetch<QuestionDetailResponse>(`/questions/${encodeURIComponent(id)}`);
+}
+
+export async function createQuestion(body: QuestionCreateRequest): Promise<{ id: string; status: string; message: string }> {
+  return apiFetch(`/questions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function reanalyzeQuestion(id: string): Promise<{ status: string; message: string }> {
+  return apiFetch(`/questions/${encodeURIComponent(id)}/reanalyze`, {
+    method: 'POST',
+  });
+}
+
+export async function updateQuestionStatus(
+  id: string,
+  status: string,
+  resolution_note?: string,
+): Promise<{ id: string; status: string }> {
+  return apiFetch(`/questions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, resolution_note }),
+  });
+}
+
+export async function getQuestionEvidence(
+  id: string,
+  limit?: number,
+): Promise<QuestionEvidenceResponse[]> {
+  const sp = new URLSearchParams();
+  if (limit) sp.set('limit', String(limit));
+  const qs = sp.toString();
+  return apiFetch<QuestionEvidenceResponse[]>(
+    `/questions/${encodeURIComponent(id)}/evidence${qs ? `?${qs}` : ''}`
   );
 }
 
