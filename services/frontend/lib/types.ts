@@ -318,3 +318,33 @@ export interface PaginatedResponse<T> {
   page: number;
   page_size: number;
 }
+
+// ============================================
+// ACCURACY HISTORY
+// ============================================
+
+export interface AccuracyTimelinePoint {
+  date: string;
+  cumulative_accuracy: number | null;
+  cumulative_brier: number | null;
+  resolved_count: number;
+  correct_count: number;
+  rolling_7d_accuracy: number | null;
+  rolling_7d_brier: number | null;
+}
+
+export interface AccuracyHistoryResponse {
+  timeline: AccuracyTimelinePoint[];
+  by_agent: Record<string, AccuracyTimelinePoint[]>;
+  by_domain: Record<string, AccuracyTimelinePoint[]>;
+  summary: {
+    total_resolved: number;
+    total_correct: number;
+    overall_accuracy: number | null;
+    overall_brier: number | null;
+    best_agent: string | null;
+    best_agent_accuracy: number | null;
+    worst_agent: string | null;
+    worst_agent_accuracy: number | null;
+  };
+}

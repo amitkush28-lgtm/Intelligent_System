@@ -31,7 +31,11 @@ export default function QuestionsPage() {
   const [formQuestion, setFormQuestion] = useState('');
   const [formContext, setFormContext] = useState('');
   const [formCategory, setFormCategory] = useState('INVESTMENT');
+  const [formPriority, setFormPriority] = useState('NORMAL');
+  const [formTags, setFormTags] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -51,20 +55,28 @@ export default function QuestionsPage() {
   const handleSubmit = async () => {
     if (!formQuestion.trim() || formQuestion.length < 10) return;
     setSubmitting(true);
+    setAnalyzing(true);
     try {
       await createQuestion({
         question: formQuestion,
         context: formContext || undefined,
         category: formCategory,
+        priority: formPriority,
+        tags: formTags ? formTags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
       });
       setFormQuestion('');
       setFormContext('');
+      setFormPriority('NORMAL');
+      setFormTags('');
       setShowForm(false);
+      setSuccessMessage('Question submitted — analysis running in background');
+      setTimeout(() => setSuccessMessage(null), 3000);
       fetchData();
     } catch (e: any) {
       setError(e.message);
     } finally {
       setSubmitting(false);
+      setAnalyzing(false);
     }
   };
 
@@ -128,7 +140,40 @@ export default function QuestionsPage() {
               </select>
             </div>
           </div>
-          <div className="flex justify-end">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Priority</label>
+              <select
+                value={formPriority}
+                onChange={(e) => setFormPriority(e.target.value)}
+                className={selectClass + ' w-full'}
+              >
+                <option value="NORMAL">NORMAL</option>
+                <option value="HIGH">HIGH</option>
+                <option value="URGENT">URGENT</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Tags (optional)</label>
+              <input
+                type="text"
+                value={formTags}
+                onChange={(e) => setFormTags(e.target.value)}
+                placeholder="e.g., market, ai, investment"
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {analyzing && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Analyzing...</span>
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+              </div>
+            )}
+            {!analyzing && (
+              <div />
+            )}
             <button
               onClick={handleSubmit}
               disabled={submitting || formQuestion.length < 10}
@@ -137,6 +182,13 @@ export default function QuestionsPage() {
               {submitting ? 'Submitting...' : 'Submit Question'}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Success Message */}
+      {successMessage && (
+        <div className="bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-4 text-sm text-emerald-400 animate-fadeIn">
+          {successMessage}
         </div>
       )}
 

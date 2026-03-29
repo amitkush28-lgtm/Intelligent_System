@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/newsletter', label: 'Newsletter', icon: '\uD83D\uDCF0' },
   { href: '/predictions', label: 'Predictions', icon: '\u25CE' },
   { href: '/agents', label: 'Agents', icon: '\u2726' },
+  { href: '/accuracy', label: 'Accuracy', icon: '\u2714' },
   { href: '/debates', label: 'Debates', icon: '\u2694' },
   { href: '/questions', label: 'Questions', icon: '\u2753' },
   { href: '/signals', label: 'Signals', icon: '\u26A0' },

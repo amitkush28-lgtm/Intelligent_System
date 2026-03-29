@@ -101,15 +101,51 @@ async def _run_full_pipeline():
     except Exception as e:
         logger.error(f"Signals failed: {e}")
 
-    logger.info("STEP 7/8: Generating newsletter...")
+    logger.info("STEP 7/8: Generating daily newsletter...")
     try:
-        newsletter_md = await _generate_newsletter()
+        newsletter_md = await _generate_newsletter(cadence="daily")
         if newsletter_md:
-            pdf_path = _convert_to_pdf(newsletter_md)
+            pdf_path = _convert_to_pdf(newsletter_md, cadence="daily")
             if pdf_path:
-                _send_email(pdf_path, newsletter_md)
+                _send_email(pdf_path, newsletter_md, cadence="daily")
     except Exception as e:
-        logger.error(f"Newsletter failed: {e}")
+        logger.error(f"Daily newsletter failed: {e}")
+
+    # Weekly newsletter (Sundays)
+    if datetime.utcnow().weekday() == 6:  # Sunday
+        logger.info("Generating weekly newsletter...")
+        try:
+            weekly_md = await _generate_newsletter(cadence="weekly")
+            if weekly_md:
+                pdf_path = _convert_to_pdf(weekly_md, cadence="weekly")
+                if pdf_path:
+                    _send_email(pdf_path, weekly_md, cadence="weekly")
+        except Exception as e:
+            logger.error(f"Weekly newsletter failed: {e}")
+
+    # Monthly newsletter (1st of month)
+    if datetime.utcnow().day == 1:
+        logger.info("Generating monthly newsletter...")
+        try:
+            monthly_md = await _generate_newsletter(cadence="monthly")
+            if monthly_md:
+                pdf_path = _convert_to_pdf(monthly_md, cadence="monthly")
+                if pdf_path:
+                    _send_email(pdf_path, monthly_md, cadence="monthly")
+        except Exception as e:
+            logger.error(f"Monthly newsletter failed: {e}")
+
+    # Yearly newsletter (January 1st)
+    if datetime.utcnow().month == 1 and datetime.utcnow().day == 1:
+        logger.info("Generating yearly newsletter...")
+        try:
+            yearly_md = await _generate_newsletter(cadence="yearly")
+            if yearly_md:
+                pdf_path = _convert_to_pdf(yearly_md, cadence="yearly")
+                if pdf_path:
+                    _send_email(pdf_path, yearly_md, cadence="yearly")
+        except Exception as e:
+            logger.error(f"Yearly newsletter failed: {e}")
 
     # Weekly trend tracker — runs on Sundays only
     if datetime.utcnow().weekday() == 6:  # Sunday
@@ -131,27 +167,68 @@ async def _run_full_pipeline():
     logger.info("=" * 60)
 
 
-async def _generate_newsletter():
-    """Generate the full 10-section newsletter using the same rich context and prompt
-    as the API route (/newsletter/generate)."""
+async def _generate_newsletter(cadence: str = "daily"):
+    """Generate a newsletter of a specific cadence.
+
+    Args:
+        cadence: One of 'daily', 'weekly', 'monthly', 'yearly'
+    """
     from shared.llm_client import call_claude_sonnet
     from shared.database import get_db_session
     from shared.models import Prediction, Event, ConfidenceTrail, WeakSignal, Debate, Note
-    from services.api.routes.newsletter import NEWSLETTER_SYSTEM_PROMPT
+    from services.api.routes.newsletter import (
+        DAILY_SYSTEM_PROMPT,
+        WEEKLY_SYSTEM_PROMPT,
+        MONTHLY_SYSTEM_PROMPT,
+        YEARLY_SYSTEM_PROMPT,
+    )
     from datetime import timedelta
 
     try:
         with get_db_session() as db:
+            # Determine lookback windows based on cadence
+            if cadence == "daily":
+                event_lookback = timedelta(hours=24)
+                recent_lookback = timedelta(days=7)
+                scorecard_window = timedelta(days=30)
+                system_prompt = DAILY_SYSTEM_PROMPT
+                read_limit = "8-12"
+            elif cadence == "weekly":
+                event_lookback = timedelta(days=7)
+                recent_lookback = timedelta(days=14)
+                scorecard_window = timedelta(days=30)
+                system_prompt = WEEKLY_SYSTEM_PROMPT
+                read_limit = "15-20"
+            elif cadence == "monthly":
+                event_lookback = timedelta(days=30)
+                recent_lookback = timedelta(days=30)
+                scorecard_window = timedelta(days=30)
+                system_prompt = MONTHLY_SYSTEM_PROMPT
+                read_limit = "25-30"
+            elif cadence == "yearly":
+                event_lookback = timedelta(days=365)
+                recent_lookback = timedelta(days=365)
+                scorecard_window = timedelta(days=365)
+                system_prompt = YEARLY_SYSTEM_PROMPT
+                read_limit = "45-60"
+            else:
+                cadence = "daily"
+                event_lookback = timedelta(hours=24)
+                recent_lookback = timedelta(days=7)
+                scorecard_window = timedelta(days=30)
+                system_prompt = DAILY_SYSTEM_PROMPT
+                read_limit = "8-12"
+
             parts = []
+            parts.append("## SYSTEM SCORECARD DATA")
 
             # --- Track record data ---
-            parts.append("## SYSTEM SCORECARD DATA")
-            thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+            scorecard_cutoff = datetime.utcnow() - scorecard_window
             resolved = (
                 db.query(Prediction)
                 .filter(
                     Prediction.status.in_(["RESOLVED_TRUE", "RESOLVED_FALSE"]),
-                    Prediction.resolved_date >= thirty_days_ago.date(),
+                    Prediction.resolved_date >= scorecard_cutoff.date(),
                 )
                 .all()
             )
@@ -160,34 +237,35 @@ async def _generate_newsletter():
             hit_rate = (correct / total_resolved * 100) if total_resolved > 0 else 0
             brier_scores = [p.brier_score for p in resolved if p.brier_score is not None]
             avg_brier = sum(brier_scores) / len(brier_scores) if brier_scores else None
-            parts.append(f"Predictions resolved (30 days): {total_resolved}")
+            parts.append(f"Predictions resolved ({scorecard_window.days} days): {total_resolved}")
             parts.append(f"Correct: {correct} ({hit_rate:.0f}%)")
             parts.append(f"Average Brier Score: {avg_brier:.3f}" if avg_brier else "Brier Score: Not yet available")
 
-            # Recently resolved (last 7 days)
-            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+            # Recently resolved
+            recent_cutoff = datetime.utcnow() - recent_lookback
             recently_resolved = (
                 db.query(Prediction)
                 .filter(
                     Prediction.status.in_(["RESOLVED_TRUE", "RESOLVED_FALSE"]),
-                    Prediction.resolved_date >= seven_days_ago.date(),
+                    Prediction.resolved_date >= recent_cutoff.date(),
                 )
                 .order_by(Prediction.resolved_date.desc())
-                .limit(10)
+                .limit(20)
                 .all()
             )
             if recently_resolved:
-                parts.append("\nRecently Resolved (last 7 days):")
+                parts.append(f"\nRecently Resolved ({recent_lookback.days}d window):")
                 for p in recently_resolved:
                     outcome = "TRUE" if p.status == "RESOLVED_TRUE" else "FALSE"
                     brier = f" (Brier: {p.brier_score:.2f})" if p.brier_score else ""
                     parts.append(f"  {outcome} [{p.agent}] {p.current_confidence:.0%}: {p.claim[:150]}{brier}")
 
-            # --- Recent events (last 24h) ---
-            cutoff = datetime.utcnow() - timedelta(hours=24)
-            events = db.query(Event).filter(Event.timestamp >= cutoff).order_by(Event.timestamp.desc()).limit(50).all()
+            # --- Recent events ---
+            event_cutoff = datetime.utcnow() - event_lookback
+            events = db.query(Event).filter(Event.timestamp >= event_cutoff).order_by(Event.timestamp.desc()).limit(50).all()
+            event_label = f"{event_lookback.days}d" if event_lookback.days > 0 else "24h"
             if events:
-                parts.append("\n## RECENT EVENTS (last 24h)")
+                parts.append(f"\n## RECENT EVENTS (last {event_label})")
                 for e in events[:40]:
                     severity_tag = f"[{e.severity.upper()}]" if e.severity else ""
                     parts.append(f"- {severity_tag} [{e.domain}] {e.source}: {(e.raw_text or '')[:250]}")
@@ -259,15 +337,22 @@ async def _generate_newsletter():
                         if q.thesis_summary:
                             parts.append(f"  {q.thesis_summary[:200]}")
             except Exception:
-                pass  # LivingQuestion model might not exist yet
+                pass
 
             # Generate the newsletter
             today = datetime.utcnow().strftime("%B %d, %Y")
             context = "\n".join(parts)
 
+            cadence_instruction = {
+                "daily": "Generate the daily intelligence newsletter.",
+                "weekly": "Generate the weekly intelligence newsletter.",
+                "monthly": "Generate the monthly strategic intelligence newsletter.",
+                "yearly": "Generate the annual intelligence review and outlook.",
+            }.get(cadence, "Generate the daily intelligence newsletter.")
+
             response = await call_claude_sonnet(
-                system_prompt=NEWSLETTER_SYSTEM_PROMPT,
-                user_message=f"""Today is {today}. Generate the daily intelligence newsletter.
+                system_prompt=system_prompt,
+                user_message=f"""Today is {today}. {cadence_instruction}
 
 SYSTEM STATE:
 {context}
@@ -275,35 +360,32 @@ SYSTEM STATE:
 INSTRUCTIONS:
 1. Follow the newsletter structure EXACTLY as specified in your system prompt.
 2. Lead with JUDGMENT, not summary.
-3. Every Key Development section must have an argumentative headline.
+3. Every argumentative section must have a thesis and end with actionable guidance.
 4. Include the Track Record scorecard using the data provided.
-5. For Contrarian Corner, use the Devil's Advocate debate material.
+5. Use the Devil's Advocate debate material for contrarian sections.
 6. Include Living Questions insights where relevant.
 7. Be SPECIFIC — cite actual numbers, dates, prices, entities.
-8. Respect the 8-12 minute read limit.
+8. Respect the {read_limit} minute read limit.
 
 Write the complete newsletter in markdown.""",
-                max_tokens=8192,
+                max_tokens=12000,
                 temperature=0.4,
             )
-            logger.info(f"Newsletter generated: {len(response)} chars")
+            logger.info(f"{cadence.upper()} newsletter generated: {len(response)} chars")
             return response
     except Exception as e:
-        logger.error(f"Newsletter generation failed: {e}")
+        logger.error(f"{cadence.upper()} newsletter generation failed: {e}")
         import traceback
         logger.debug(traceback.format_exc())
         return None
 
 
-def _convert_to_pdf(markdown_text):
-    """Convert the 10-section newsletter markdown to a professionally formatted PDF.
+def _convert_to_pdf(markdown_text, cadence: str = "daily"):
+    """Convert newsletter markdown to a professionally formatted PDF.
 
-    Sections handled:
-    1. Track Record        2. The One Thing That Matters Today
-    3. Key Developments    4. Convergence Alerts
-    5. New Predictions     6. Prediction Scorecard
-    7. Contrarian Corner   8. What We're Watching
-    9. Portfolio Implications  10. Travel & Safety Advisory
+    Args:
+        markdown_text: The newsletter markdown content
+        cadence: Newsletter cadence (daily, weekly, monthly, yearly)
     """
     try:
         import re
@@ -319,7 +401,10 @@ def _convert_to_pdf(markdown_text):
 
         today_str = datetime.utcnow().strftime("%Y-%m-%d")
         today_display = datetime.utcnow().strftime("%B %d, %Y")
-        pdf_path = f"/tmp/intelligence-brief-{today_str}.pdf"
+
+        # Include cadence in filename
+        cadence_prefix = f"{cadence.lower()}-"
+        pdf_path = f"/tmp/{cadence_prefix}intelligence-brief-{today_str}.pdf"
 
         # -- Color palette --
         NAVY = HexColor("#0f172a")
@@ -534,15 +619,22 @@ def _convert_to_pdf(markdown_text):
 
         flush_paragraph()
 
-        # Footer
+        # Footer with cadence
         elements.append(Spacer(1, 20))
         elements.append(section_divider(LIGHT_TEXT))
         footer_style = ParagraphStyle(
             "Footer", parent=body_style,
             fontSize=8, textColor=LIGHT_TEXT, alignment=TA_CENTER,
         )
+        cadence_label = {
+            "daily": "Daily Intelligence Brief",
+            "weekly": "Weekly Intelligence Brief",
+            "monthly": "Monthly Strategic Review",
+            "yearly": "Annual Intelligence Review",
+        }.get(cadence, "Intelligence Brief")
+
         elements.append(Paragraph(
-            f"Intelligence Brief &mdash; Generated {today_display} &mdash; Multi-Agent Intelligence System v2.0",
+            f"{cadence_label} &mdash; Generated {today_display} &mdash; Multi-Agent Intelligence System v2.0",
             footer_style,
         ))
 
@@ -556,7 +648,14 @@ def _convert_to_pdf(markdown_text):
         return None
 
 
-def _send_email(pdf_path, markdown_text):
+def _send_email(pdf_path, markdown_text, cadence: str = "daily"):
+    """Send newsletter via email.
+
+    Args:
+        pdf_path: Path to the PDF file
+        markdown_text: The newsletter markdown content
+        cadence: Newsletter cadence (daily, weekly, monthly, yearly)
+    """
     smtp_host = os.environ.get("SMTP_HOST", "")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_user = os.environ.get("SMTP_USER", "")
@@ -570,19 +669,29 @@ def _send_email(pdf_path, markdown_text):
 
     try:
         today_str = datetime.utcnow().strftime("%B %d, %Y")
+
+        # Build subject line based on cadence
+        subject_label = {
+            "daily": "Daily Intelligence Brief",
+            "weekly": "Weekly Intelligence Brief",
+            "monthly": "Monthly Strategic Review",
+            "yearly": "Annual Intelligence Review",
+        }.get(cadence, "Intelligence Brief")
+
         msg = MIMEMultipart()
         msg["From"] = email_from
         msg["To"] = email_to
-        msg["Subject"] = f"Intelligence Brief - {today_str}"
+        msg["Subject"] = f"{subject_label} - {today_str}"
 
         summary = markdown_text[:500].replace("#", "").replace("*", "")
-        msg.attach(MIMEText(f"Daily Intelligence Brief - {today_str}\n\n{summary}\n\n[Full newsletter attached as PDF]", "plain"))
+        msg.attach(MIMEText(f"{subject_label} - {today_str}\n\n{summary}\n\n[Full newsletter attached as PDF]", "plain"))
 
         with open(pdf_path, "rb") as f:
             part = MIMEBase("application", "pdf")
             part.set_payload(f.read())
             encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="intelligence-brief-{datetime.utcnow().strftime("%Y-%m-%d")}.pdf"')
+            cadence_filename = f"{cadence}-intelligence-brief-{datetime.utcnow().strftime('%Y-%m-%d')}.pdf"
+            part.add_header("Content-Disposition", f'attachment; filename="{cadence_filename}"')
             msg.attach(part)
 
         with smtplib.SMTP(smtp_host, smtp_port) as server:
@@ -590,7 +699,7 @@ def _send_email(pdf_path, markdown_text):
             server.login(smtp_user, smtp_password)
             server.send_message(msg)
 
-        logger.info(f"Newsletter emailed to {email_to}")
+        logger.info(f"{cadence.upper()} newsletter emailed to {email_to}")
     except Exception as e:
         logger.error(f"Email delivery failed: {e}")
 

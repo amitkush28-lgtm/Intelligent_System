@@ -18,6 +18,7 @@ import {
   QuestionDetailResponse,
   QuestionCreateRequest,
   QuestionEvidenceResponse,
+  AccuracyHistoryResponse,
 } from './types';
 
 const API_URL =
@@ -56,6 +57,13 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
 
 export async function getCalibrationCurve(): Promise<CalibrationCurveResponse> {
   return apiFetch<CalibrationCurveResponse>('/dashboard/calibration');
+}
+
+export async function getAccuracyHistory(days?: number): Promise<AccuracyHistoryResponse> {
+  const sp = new URLSearchParams();
+  if (days) sp.set('days', String(days));
+  const qs = sp.toString();
+  return apiFetch<AccuracyHistoryResponse>(`/dashboard/accuracy-history${qs ? `?${qs}` : ''}`);
 }
 
 // ============================================
