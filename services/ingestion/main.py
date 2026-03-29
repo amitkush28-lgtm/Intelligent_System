@@ -50,6 +50,12 @@ from services.ingestion.sources.google_trends import fetch_google_trends_events
 from services.ingestion.sources.arxiv import fetch_arxiv_events
 from services.ingestion.sources.metaculus import fetch_metaculus_events
 
+# Source imports — Phase 4 (next-tier data sources)
+from services.ingestion.sources.central_banks import fetch_central_bank_events
+from services.ingestion.sources.crunchbase import fetch_crunchbase_events
+from services.ingestion.sources.flightaware import fetch_flightaware_events
+from services.ingestion.sources.marine_traffic import fetch_marine_traffic_events
+
 # Pipeline imports
 from services.ingestion.pipeline.nlp import enrich_event_entities
 from services.ingestion.pipeline.classifier import classify_events_batch
@@ -99,6 +105,11 @@ def _get_source_reliability(source: str, source_detail: str = "") -> float:
         "metaculus": "verified_social_media",
         "manifold": "verified_social_media",
         "trend_tracker": "established_newspaper",  # Internal analysis
+        # Phase 4
+        "central_bank": "government_statement",
+        "crunchbase": "verified_social_media",
+        "flightaware": "established_newspaper",
+        "marine_traffic": "established_newspaper",
     }
 
     category = source_map.get(source, source)
@@ -141,6 +152,11 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("GoogleTrends", fetch_google_trends_events),
         ("ArXiv", fetch_arxiv_events),
         ("Metaculus", fetch_metaculus_events),
+        # Phase 4 — Next-tier data sources
+        ("CentralBanks", fetch_central_bank_events),
+        ("Crunchbase", fetch_crunchbase_events),
+        ("FlightAware", fetch_flightaware_events),
+        ("MarineTraffic", fetch_marine_traffic_events),
     ]
 
     for source_name, fetcher in sources:
