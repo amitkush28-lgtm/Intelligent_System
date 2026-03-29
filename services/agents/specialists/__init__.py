@@ -1,5 +1,8 @@
 """
-Specialist agents for the multi-agent intelligence system.
+Specialist agents — one per analytical domain.
+
+All inherit from BaseAgent which provides the Cascading Consequences framework,
+Prediction Quality Gates, and standard analysis cycle.
 """
 
 from services.agents.specialists.economist import EconomistAgent
@@ -7,6 +10,7 @@ from services.agents.specialists.geopolitical import GeopoliticalAgent
 from services.agents.specialists.investor import InvestorAgent
 from services.agents.specialists.political import PoliticalAgent
 from services.agents.specialists.sentiment import SentimentAgent
+from services.agents.specialists.wildcard import WildCardAgent
 from services.agents.specialists.master import MasterAgent
 
 __all__ = [
@@ -15,15 +19,6 @@ __all__ = [
     "InvestorAgent",
     "PoliticalAgent",
     "SentimentAgent",
+    "WildCardAgent",
     "MasterAgent",
 ]
-
-# Agent registry for dynamic lookup
-AGENT_REGISTRY = {
-    "economist": EconomistAgent,
-    "geopolitical": GeopoliticalAgent,
-    "investor": InvestorAgent,
-    "political": PoliticalAgent,
-    "sentiment": SentimentAgent,
-    "master": MasterAgent,
-}
