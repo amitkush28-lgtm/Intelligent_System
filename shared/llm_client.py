@@ -1,6 +1,6 @@
 """
-LLM client wrappers for Claude Haiku (primary agents + bulk ops)
-and Gemini (devil's advocate). All services use these instead of direct API calls.
+LLM client wrappers for Claude (agents), Gemini (devil's advocate), and web search.
+All services use these instead of direct API calls.
 """
 
 import json
@@ -8,17 +8,13 @@ import logging
 from typing import Optional
 
 import anthropic
-from google import genai
-from google.genai import types
 
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Initialize clients lazily
 _anthropic_client: Optional[anthropic.Anthropic] = None
-_gemini_client: Optional[genai.Client] = None
 
 
 def _get_anthropic() -> anthropic.Anthropic:
@@ -28,20 +24,13 @@ def _get_anthropic() -> anthropic.Anthropic:
     return _anthropic_client
 
 
-def _get_gemini() -> genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-    return _gemini_client
-
-
 async def call_claude_sonnet(
     system_prompt: str,
     user_message: str,
     max_tokens: int = 8192,
     temperature: float = 0.3,
 ) -> str:
-    """Primary agent analysis via Claude (Haiku for cost savings, Sonnet when upgraded)."""
+    """Primary agent analysis via Claude (Sonnet or Haiku depending on config)."""
     try:
         client = _get_anthropic()
         response = client.messages.create(
@@ -66,7 +55,7 @@ async def call_claude_haiku(
     max_tokens: int = 4096,
     temperature: float = 0.2,
 ) -> str:
-    """Bulk operations via Claude Haiku — classification, sentiment, sponsored detection."""
+    """Bulk operations via Claude Haiku."""
     try:
         client = _get_anthropic()
         response = client.messages.create(
@@ -85,23 +74,19 @@ async def call_claude_haiku(
         raise
 
 
-async def call_gpt4o(
+async def call_devil_advocate(
     system_prompt: str,
     user_message: str,
-    max_tokens: int = 8192,
+    max_tokens: int = 4096,
     temperature: float = 0.4,
 ) -> str:
-    """Devil's advocate challenges via Gemini (different model provider = genuine adversarial tension)."""
+    """Devil's advocate via Gemini (different model = genuine adversarial tension)."""
     try:
-        client = _get_gemini()
+        from google import genai
+        client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=f"{user_message}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-            ),
+            model="gemini-2.5-flash-preview-04-17",
+            contents=f"{system_prompt}\n\n{user_message}",
         )
         return response.text
     except Exception as e:
@@ -109,12 +94,22 @@ async def call_gpt4o(
         raise
 
 
+async def call_gpt4o(
+    system_prompt: str,
+    user_message: str,
+    max_tokens: int = 4096,
+    temperature: float = 0.4,
+) -> str:
+    """Alias for devil_advocate — uses Gemini."""
+    return await call_devil_advocate(system_prompt, user_message, max_tokens, temperature)
+
+
 async def call_claude_with_web_search(
     system_prompt: str,
     user_message: str,
     max_tokens: int = 8192,
 ) -> str:
-    """Claude with web search tool enabled — used by verification engine and weak signal scanner."""
+    """Claude with web search tool enabled."""
     try:
         client = _get_anthropic()
         response = client.messages.create(
@@ -124,7 +119,6 @@ async def call_claude_with_web_search(
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": user_message}],
         )
-        # Extract text content from potentially multi-block response
         text_parts = [block.text for block in response.content if hasattr(block, "text")]
         return "\n".join(text_parts)
     except anthropic.APIError as e:
@@ -138,7 +132,6 @@ async def call_claude_with_web_search(
 def parse_structured_json(response_text: str) -> dict:
     """Extract JSON from LLM response, handling markdown fences."""
     text = response_text.strip()
-    # Strip markdown code fences
     if text.startswith("```json"):
         text = text[7:]
     elif text.startswith("```"):
