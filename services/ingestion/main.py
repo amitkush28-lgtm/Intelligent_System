@@ -49,6 +49,7 @@ from services.ingestion.sources.thenewsapi import fetch_thenewsapi_events
 from services.ingestion.sources.google_trends import fetch_google_trends_events
 from services.ingestion.sources.arxiv import fetch_arxiv_events
 from services.ingestion.sources.metaculus import fetch_metaculus_events
+from services.ingestion.sources.patents import fetch_patent_events
 
 # Source imports — Phase 4 (next-tier data sources)
 from services.ingestion.sources.central_banks import fetch_central_bank_events
@@ -152,6 +153,7 @@ async def _fetch_all_sources() -> List[Dict[str, Any]]:
         ("GoogleTrends", fetch_google_trends_events),
         ("ArXiv", fetch_arxiv_events),
         ("Metaculus", fetch_metaculus_events),
+        ("USPTO_Patents", fetch_patent_events),
         # Phase 4 — Next-tier data sources
         ("CentralBanks", fetch_central_bank_events),
         ("Crunchbase", fetch_crunchbase_events),

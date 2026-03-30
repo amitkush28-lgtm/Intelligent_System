@@ -220,7 +220,7 @@ EXPECTED_SOURCES = [
     "acled", "polymarket", "cftc", "sec_edgar", "bls", "world_bank",
     "ofac", "thenewsapi", "google_trends", "arxiv", "metaculus",
     "manifold", "central_banks", "crunchbase", "flightaware",
-    "marine_traffic",
+    "marine_traffic", "uspto_patents",
 ]
 
 
