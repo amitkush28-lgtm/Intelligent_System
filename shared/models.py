@@ -321,9 +321,11 @@ class QuestionAssumption(Base):
 
     id = Column(String, primary_key=True)
     question_id = Column(String, ForeignKey("living_questions.id", ondelete="CASCADE"), nullable=False)
+    parent_id = Column(String, ForeignKey("question_assumptions.id", ondelete="CASCADE"), nullable=True)
 
     assumption_text = Column(Text, nullable=False)
     assumption_number = Column(Integer, nullable=False)
+    sub_label = Column(String, nullable=True)  # e.g. "A", "B" for sub-assumptions 6A, 6B
 
     status = Column(String, default="green")
     confidence = Column(Integer, nullable=True)
@@ -341,12 +343,15 @@ class QuestionAssumption(Base):
 
     keywords = Column(JSON, nullable=True)
     relevant_agents = Column(JSON, nullable=True)
+    monitoring_data_points = Column(JSON, nullable=True)  # structured data points to track
+    baseline_data = Column(JSON, nullable=True)  # baseline values at creation time
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     question = relationship("LivingQuestion", back_populates="assumptions")
     evidence_entries = relationship("QuestionEvidence", back_populates="assumption", cascade="all, delete-orphan")
+    parent = relationship("QuestionAssumption", remote_side=[id], backref="sub_assumptions")
 
 
 class QuestionEvidence(Base):
@@ -413,6 +418,7 @@ class QuestionFollowup(Base):
 
     role = Column(String, nullable=False)  # "user" or "assistant"
     message = Column(Text, nullable=False)
+    tool_actions = Column(JSON, nullable=True)  # structured actions taken (assumption creates/updates)
 
     created_at = Column(DateTime, server_default=func.now())
 

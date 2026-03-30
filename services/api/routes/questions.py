@@ -77,6 +77,10 @@ class AssumptionResponse(BaseModel):
     challenging_evidence_count: int
     current_assessment: Optional[str]
     keywords: Optional[list]
+    parent_id: Optional[str] = None
+    sub_label: Optional[str] = None
+    monitoring_data_points: Optional[list] = None
+    baseline_data: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 
@@ -307,6 +311,10 @@ async def get_question(
             challenging_evidence_count=a.challenging_evidence_count,
             current_assessment=a.current_assessment,
             keywords=a.keywords,
+            parent_id=a.parent_id,
+            sub_label=a.sub_label,
+            monitoring_data_points=a.monitoring_data_points,
+            baseline_data=a.baseline_data,
         ) for a in assumptions],
         recent_evidence=[EvidenceResponse(
             id=e.id,
@@ -430,13 +438,72 @@ FOLLOWUP_SYSTEM_PROMPT = """You are the Master Strategist of a multi-agent intel
 You have full context on:
 - The original question and thesis
 - The current verdict, confidence level, and traffic-light status
-- All assumptions and their current states
+- All assumptions and their current states (including any sub-assumptions)
 - Recent evidence that has been logged
 - Agent perspectives from 6 specialist agents
 
 Answer the user's follow-up question with the same voice as the intelligence newsletter: confident, direct, specific, honest about uncertainty. Reference specific assumptions by number when relevant. Cite specific data points from the evidence when available.
 
-Keep responses concise (2-4 paragraphs) unless the question demands more depth. End with a clear actionable takeaway when appropriate."""
+## TOOL CAPABILITY — MODIFYING THE TRACKING SYSTEM
+
+You can take REAL ACTIONS on the tracking system by including a `tool_actions` array in your JSON response. Available actions:
+
+### create_sub_assumption
+Add a sub-assumption under an existing parent assumption:
+{
+  "action": "create_sub_assumption",
+  "parent_assumption_number": 6,
+  "sub_label": "A",
+  "assumption_text": "IT services sector will maintain 6-8% annual growth...",
+  "status": "yellow",
+  "confidence": 60,
+  "green_to_yellow_trigger": "If TCS/Infosys report headcount declines >8% YoY...",
+  "yellow_to_red_trigger": "If headcount declines >15% YoY sustained...",
+  "keywords": ["IT services", "TCS", "Infosys", "headcount"],
+  "relevant_agents": ["economist", "investor"],
+  "monitoring_data_points": ["TCS headcount", "Infosys margins", "Bangalore unemployment"],
+  "baseline_data": {"IT_headcount": "5.1M", "operating_margins": "19-21%"}
+}
+
+### update_assumption
+Modify an existing assumption's status, confidence, or assessment:
+{
+  "action": "update_assumption",
+  "assumption_number": 3,
+  "sub_label": null,
+  "updates": {
+    "status": "yellow",
+    "confidence": 45,
+    "current_assessment": "New evidence suggests this assumption is under pressure..."
+  }
+}
+
+### add_monitoring_data
+Add data points to track for an assumption:
+{
+  "action": "add_monitoring_data",
+  "assumption_number": 6,
+  "sub_label": "A",
+  "monitoring_data_points": ["Q4 earnings", "AI services revenue %"],
+  "baseline_data": {"metric_name": "value"}
+}
+
+## RESPONSE FORMAT
+
+Respond with ONLY valid JSON:
+{
+  "message": "Your natural language response to the user (2-4 paragraphs, same voice as before)",
+  "tool_actions": [
+    // Array of action objects, or empty array if no actions needed
+  ]
+}
+
+IMPORTANT:
+- Only include tool_actions when the conversation clearly warrants a change to the tracking system
+- When the user asks you to add/create/track something, DO include the appropriate action
+- When the user is just asking a question, return an empty tool_actions array
+- The message field should describe what you did AND provide analytical insight
+- Always include the message field — it's what the user sees"""
 
 
 @router.get("/{question_id}/followups", response_model=List[FollowupMessageResponse])
@@ -530,7 +597,16 @@ async def ask_followup(
 
     if assumptions:
         context_parts.append("\nASSUMPTIONS:")
-        for a in assumptions:
+        # Show parent assumptions first, then their sub-assumptions
+        parents = [a for a in assumptions if a.parent_id is None]
+        subs = [a for a in assumptions if a.parent_id is not None]
+        sub_map = {}
+        for s in subs:
+            if s.parent_id not in sub_map:
+                sub_map[s.parent_id] = []
+            sub_map[s.parent_id].append(s)
+
+        for a in parents:
             context_parts.append(
                 f"  #{a.assumption_number} [{a.status.upper()}] ({a.confidence or '?'}%): {a.assumption_text}"
             )
@@ -540,6 +616,25 @@ async def ask_followup(
                 context_parts.append(f"    Yellow trigger: {a.green_to_yellow_trigger}")
             if a.yellow_to_red_trigger:
                 context_parts.append(f"    Red trigger: {a.yellow_to_red_trigger}")
+            if a.monitoring_data_points:
+                context_parts.append(f"    Monitoring: {', '.join(a.monitoring_data_points[:5])}")
+
+            # Show sub-assumptions indented
+            for sub in sub_map.get(a.id, []):
+                context_parts.append(
+                    f"    #{a.assumption_number}{sub.sub_label} [{sub.status.upper()}] ({sub.confidence or '?'}%): {sub.assumption_text}"
+                )
+                if sub.current_assessment:
+                    context_parts.append(f"      Assessment: {sub.current_assessment[:200]}")
+                if sub.green_to_yellow_trigger:
+                    context_parts.append(f"      Yellow trigger: {sub.green_to_yellow_trigger}")
+                if sub.yellow_to_red_trigger:
+                    context_parts.append(f"      Red trigger: {sub.yellow_to_red_trigger}")
+                if sub.monitoring_data_points:
+                    context_parts.append(f"      Monitoring: {', '.join(sub.monitoring_data_points[:5])}")
+                if sub.baseline_data:
+                    baseline_str = ", ".join(f"{k}: {v}" for k, v in sub.baseline_data.items())
+                    context_parts.append(f"      Baseline: {baseline_str[:200]}")
 
     if evidence:
         context_parts.append("\nRECENT EVIDENCE:")
@@ -567,22 +662,45 @@ CONVERSATION HISTORY:
         conversation += f"{role_label}: {msg.message}\n\n"
 
     # Call Claude for the response
+    tool_actions = []
     try:
-        response = await call_claude_sonnet(
+        raw_response = await call_claude_sonnet(
             system_prompt=FOLLOWUP_SYSTEM_PROMPT,
             user_message=conversation,
-            max_tokens=2048,
+            max_tokens=3072,
             temperature=0.3,
         )
+
+        # Try to parse structured response with tool_actions
+        parsed = parse_structured_json(raw_response)
+        if parsed and isinstance(parsed, dict) and "message" in parsed:
+            response = parsed["message"]
+            tool_actions = parsed.get("tool_actions", [])
+        else:
+            # Fallback: treat entire response as the message
+            response = raw_response
+
     except Exception as e:
         logger.error(f"Follow-up LLM call failed for {question_id}: {e}")
         response = f"I wasn't able to process this follow-up right now. Please try again shortly. (Error: {str(e)[:100]})"
 
-    # Save the assistant response
+    # Execute tool actions if any
+    actions_taken = []
+    if tool_actions:
+        for action_data in tool_actions:
+            try:
+                result = _execute_followup_action(db, question_id, action_data, assumptions)
+                actions_taken.append(result)
+            except Exception as e:
+                logger.error(f"Follow-up action failed: {e}")
+                actions_taken.append({"action": action_data.get("action", "unknown"), "error": str(e)[:200]})
+
+    # Save the assistant response with tool actions
     assistant_msg = QuestionFollowup(
         question_id=question_id,
         role="assistant",
         message=response,
+        tool_actions=actions_taken if actions_taken else None,
     )
     db.add(assistant_msg)
     db.commit()
@@ -594,6 +712,168 @@ CONVERSATION HISTORY:
         message=assistant_msg.message,
         created_at=assistant_msg.created_at,
     )
+
+
+# =============================================================================
+# FOLLOW-UP ACTION EXECUTION
+# =============================================================================
+
+def _execute_followup_action(
+    db: Session,
+    question_id: str,
+    action_data: dict,
+    existing_assumptions: list,
+) -> dict:
+    """
+    Execute a structured action from the follow-up LLM response.
+    Returns a dict describing what was done.
+    """
+    from shared.models import QuestionAssumption
+
+    action_type = action_data.get("action", "")
+
+    if action_type == "create_sub_assumption":
+        parent_num = action_data.get("parent_assumption_number")
+        sub_label = action_data.get("sub_label", "A")
+
+        # Find the parent assumption
+        parent = None
+        for a in existing_assumptions:
+            if a.assumption_number == parent_num and a.parent_id is None:
+                parent = a
+                break
+
+        if not parent:
+            return {"action": "create_sub_assumption", "error": f"Parent assumption #{parent_num} not found"}
+
+        # Generate sub-assumption ID: LQ-2026-0001-A6A
+        sub_id = f"{question_id}-A{parent_num}{sub_label}"
+
+        # Check if it already exists
+        existing = db.query(QuestionAssumption).filter(QuestionAssumption.id == sub_id).first()
+        if existing:
+            return {"action": "create_sub_assumption", "status": "already_exists", "id": sub_id}
+
+        sub_assumption = QuestionAssumption(
+            id=sub_id,
+            question_id=question_id,
+            parent_id=parent.id,
+            assumption_text=action_data.get("assumption_text", ""),
+            assumption_number=parent_num,
+            sub_label=sub_label,
+            status=action_data.get("status", "green"),
+            confidence=action_data.get("confidence"),
+            green_to_yellow_trigger=action_data.get("green_to_yellow_trigger", ""),
+            yellow_to_red_trigger=action_data.get("yellow_to_red_trigger", ""),
+            keywords=action_data.get("keywords", []),
+            relevant_agents=action_data.get("relevant_agents", []),
+            monitoring_data_points=action_data.get("monitoring_data_points", []),
+            baseline_data=action_data.get("baseline_data", {}),
+            current_assessment=action_data.get("assumption_text", ""),
+        )
+        db.add(sub_assumption)
+        db.flush()
+
+        logger.info(f"Created sub-assumption {sub_id} under #{parent_num}")
+        return {
+            "action": "create_sub_assumption",
+            "status": "created",
+            "id": sub_id,
+            "parent_id": parent.id,
+            "sub_label": sub_label,
+        }
+
+    elif action_type == "update_assumption":
+        target_num = action_data.get("assumption_number")
+        target_sub_label = action_data.get("sub_label")
+        updates = action_data.get("updates", {})
+
+        # Find the assumption
+        target = None
+        for a in existing_assumptions:
+            if a.assumption_number == target_num:
+                if target_sub_label:
+                    if a.sub_label == target_sub_label:
+                        target = a
+                        break
+                elif a.parent_id is None:
+                    target = a
+                    break
+
+        if not target:
+            # Also check for newly created sub-assumptions
+            label_suffix = f"{target_num}{target_sub_label}" if target_sub_label else str(target_num)
+            target_id = f"{question_id}-A{label_suffix}"
+            target = db.query(QuestionAssumption).filter(QuestionAssumption.id == target_id).first()
+
+        if not target:
+            return {"action": "update_assumption", "error": f"Assumption #{target_num}{target_sub_label or ''} not found"}
+
+        # Apply updates
+        old_status = target.status
+        for field, value in updates.items():
+            if field in ("status", "confidence", "current_assessment",
+                        "green_to_yellow_trigger", "yellow_to_red_trigger",
+                        "keywords", "relevant_agents"):
+                setattr(target, field, value)
+
+        if "status" in updates and updates["status"] != old_status:
+            from datetime import datetime
+            target.last_status_change_at = datetime.utcnow()
+            target.last_status_change_reason = f"Updated via follow-up conversation"
+
+        db.flush()
+
+        logger.info(f"Updated assumption #{target_num}{target_sub_label or ''}: {list(updates.keys())}")
+        return {
+            "action": "update_assumption",
+            "status": "updated",
+            "id": target.id,
+            "fields_updated": list(updates.keys()),
+        }
+
+    elif action_type == "add_monitoring_data":
+        target_num = action_data.get("assumption_number")
+        target_sub_label = action_data.get("sub_label")
+
+        # Find the assumption
+        target = None
+        for a in existing_assumptions:
+            if a.assumption_number == target_num:
+                if target_sub_label and a.sub_label == target_sub_label:
+                    target = a
+                    break
+                elif not target_sub_label and a.parent_id is None:
+                    target = a
+                    break
+
+        if not target:
+            return {"action": "add_monitoring_data", "error": f"Assumption #{target_num}{target_sub_label or ''} not found"}
+
+        # Merge monitoring data points
+        existing_points = target.monitoring_data_points or []
+        new_points = action_data.get("monitoring_data_points", [])
+        merged_points = list(set(existing_points + new_points))
+        target.monitoring_data_points = merged_points
+
+        # Merge baseline data
+        existing_baseline = target.baseline_data or {}
+        new_baseline = action_data.get("baseline_data", {})
+        existing_baseline.update(new_baseline)
+        target.baseline_data = existing_baseline
+
+        db.flush()
+
+        logger.info(f"Added monitoring data to assumption #{target_num}{target_sub_label or ''}")
+        return {
+            "action": "add_monitoring_data",
+            "status": "updated",
+            "id": target.id,
+            "data_points_count": len(merged_points),
+        }
+
+    else:
+        return {"action": action_type, "error": f"Unknown action type: {action_type}"}
 
 
 # =============================================================================

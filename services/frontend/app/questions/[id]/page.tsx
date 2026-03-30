@@ -247,18 +247,35 @@ export default function QuestionDetailPage() {
       )}
 
       {/* Assumptions Grid */}
-      {assumptions.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200 mb-3">
-            Assumptions ({assumptions.length})
-          </h2>
-          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-            {assumptions.map((a) => (
-              <AssumptionCard key={a.id} assumption={a} />
-            ))}
+      {assumptions.length > 0 && (() => {
+        const parents = assumptions.filter(a => !a.parent_id);
+        const subs = assumptions.filter(a => a.parent_id);
+        const subMap: Record<string, QuestionAssumptionResponse[]> = {};
+        subs.forEach(s => {
+          if (s.parent_id) {
+            if (!subMap[s.parent_id]) subMap[s.parent_id] = [];
+            subMap[s.parent_id].push(s);
+          }
+        });
+
+        return (
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200 mb-3">
+              Assumptions ({parents.length}{subs.length > 0 ? ` + ${subs.length} sub` : ''})
+            </h2>
+            <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+              {parents.map((a) => (
+                <div key={a.id} className="space-y-2">
+                  <AssumptionCard assumption={a} />
+                  {(subMap[a.id] || []).map((sub) => (
+                    <SubAssumptionCard key={sub.id} assumption={sub} />
+                  ))}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Agent Perspectives */}
       {Object.keys(perspectives).length > 0 && (
@@ -439,6 +456,73 @@ function AssumptionCard({ assumption }: { assumption: QuestionAssumptionResponse
               {assumption.keywords.map((kw) => (
                 <span key={kw} className="px-1.5 py-0.5 bg-surface-700 rounded text-[10px] text-slate-500">
                   {kw}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function SubAssumptionCard({ assumption }: { assumption: QuestionAssumptionResponse }) {
+  const light = TRAFFIC_LIGHT[assumption.status || 'green'];
+
+  return (
+    <div className={`ml-6 bg-surface-700/20 border ${light.border} border-dashed rounded-lg p-3`}>
+      <div className="flex items-start gap-2">
+        <div className="flex-shrink-0 flex items-center justify-center h-5 w-auto px-1.5 rounded bg-surface-700 text-[10px] text-slate-400 font-medium">
+          {assumption.assumption_number}{assumption.sub_label}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-slate-300 leading-snug">{assumption.assumption_text}</p>
+
+          <div className="flex items-center gap-3 mt-1.5">
+            <span className={`inline-flex items-center gap-1 text-[10px] ${light.text}`}>
+              <span className={`h-1 w-1 rounded-full ${light.dot}`} />
+              {light.label}
+            </span>
+            {assumption.confidence != null && (
+              <span className="text-[10px] text-slate-400 tabular-nums">{assumption.confidence}%</span>
+            )}
+          </div>
+
+          {/* Tripwires */}
+          {(assumption.green_to_yellow_trigger || assumption.yellow_to_red_trigger) && (
+            <div className="mt-2 space-y-0.5">
+              {assumption.green_to_yellow_trigger && (
+                <div className="flex gap-1.5 text-[10px]">
+                  <span className="text-amber-500 flex-shrink-0">&#9650;</span>
+                  <span className="text-slate-500">{assumption.green_to_yellow_trigger}</span>
+                </div>
+              )}
+              {assumption.yellow_to_red_trigger && (
+                <div className="flex gap-1.5 text-[10px]">
+                  <span className="text-red-500 flex-shrink-0">&#9650;</span>
+                  <span className="text-slate-500">{assumption.yellow_to_red_trigger}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Monitoring Data Points */}
+          {assumption.monitoring_data_points && assumption.monitoring_data_points.length > 0 && (
+            <div className="mt-2">
+              <span className="text-[10px] text-slate-500 font-medium">Tracking: </span>
+              <span className="text-[10px] text-slate-400">
+                {assumption.monitoring_data_points.join(' \u00B7 ')}
+              </span>
+            </div>
+          )}
+
+          {/* Baseline Data */}
+          {assumption.baseline_data && Object.keys(assumption.baseline_data).length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {Object.entries(assumption.baseline_data).map(([k, v]) => (
+                <span key={k} className="px-1.5 py-0.5 bg-surface-700/50 rounded text-[10px] text-slate-500">
+                  {k}: {v}
                 </span>
               ))}
             </div>

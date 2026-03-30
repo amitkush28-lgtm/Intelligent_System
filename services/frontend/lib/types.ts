@@ -262,6 +262,10 @@ export interface QuestionAssumptionResponse {
   challenging_evidence_count: number;
   current_assessment: string | null;
   keywords: string[] | null;
+  parent_id: string | null;
+  sub_label: string | null;
+  monitoring_data_points: string[] | null;
+  baseline_data: Record<string, string> | null;
 }
 
 export interface QuestionEvidenceResponse {
