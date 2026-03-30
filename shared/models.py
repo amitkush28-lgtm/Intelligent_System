@@ -405,9 +405,24 @@ class QuestionReanalysis(Base):
     question = relationship("LivingQuestion", back_populates="reanalyses")
 
 
+class QuestionFollowup(Base):
+    __tablename__ = "question_followups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question_id = Column(String, ForeignKey("living_questions.id", ondelete="CASCADE"), nullable=False)
+
+    role = Column(String, nullable=False)  # "user" or "assistant"
+    message = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    question = relationship("LivingQuestion", backref="followups")
+
+
 # Living Questions indexes
 Index("idx_living_questions_status", LivingQuestion.status)
 Index("idx_question_assumptions_question", QuestionAssumption.question_id)
 Index("idx_question_evidence_question", QuestionEvidence.question_id)
 Index("idx_question_evidence_assumption", QuestionEvidence.assumption_id)
 Index("idx_question_reanalyses_question", QuestionReanalysis.question_id)
+Index("idx_question_followups_question", QuestionFollowup.question_id)

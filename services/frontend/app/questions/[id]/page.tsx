@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getQuestion, reanalyzeQuestion, updateQuestionStatus } from '@/lib/api';
-import { QuestionDetailResponse, QuestionAssumptionResponse, QuestionEvidenceResponse } from '@/lib/types';
+import { getQuestion, reanalyzeQuestion, updateQuestionStatus, getFollowups, askFollowup } from '@/lib/api';
+import { QuestionDetailResponse, QuestionAssumptionResponse, QuestionEvidenceResponse, FollowupMessage } from '@/lib/types';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import { formatDateTime, timeAgo, formatDate } from '@/lib/utils';
 
@@ -40,6 +40,10 @@ export default function QuestionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [followups, setFollowups] = useState<FollowupMessage[]>([]);
+  const [followupInput, setFollowupInput] = useState('');
+  const [followupLoading, setFollowupLoading] = useState(false);
+  const [showChat, setShowChat] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -55,6 +59,36 @@ export default function QuestionDetailPage() {
   }, [questionId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const loadFollowups = useCallback(async () => {
+    try {
+      const msgs = await getFollowups(questionId);
+      setFollowups(msgs);
+      if (msgs.length > 0) setShowChat(true);
+    } catch {
+      // Followups table might not exist yet — that's OK
+    }
+  }, [questionId]);
+
+  useEffect(() => { loadFollowups(); }, [loadFollowups]);
+
+  const handleAskFollowup = async () => {
+    const msg = followupInput.trim();
+    if (!msg || followupLoading) return;
+    setFollowupLoading(true);
+    setFollowupInput('');
+    // Optimistically add the user message
+    setFollowups(prev => [...prev, { id: Date.now(), role: 'user', message: msg, created_at: new Date().toISOString() }]);
+    try {
+      const response = await askFollowup(questionId, msg);
+      // Replace optimistic + add assistant response
+      setFollowups(prev => [...prev, response]);
+    } catch (e: any) {
+      setFollowups(prev => [...prev, { id: Date.now(), role: 'assistant', message: `Error: ${e.message}`, created_at: new Date().toISOString() }]);
+    } finally {
+      setFollowupLoading(false);
+    }
+  };
 
   const handleReanalyze = async () => {
     setActionLoading(true);
@@ -246,6 +280,84 @@ export default function QuestionDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Follow-up Chat */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-200">Ask Follow-up</h2>
+          {!showChat && followups.length === 0 && (
+            <button
+              onClick={() => setShowChat(true)}
+              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Open Chat
+            </button>
+          )}
+        </div>
+
+        {(showChat || followups.length > 0) && (
+          <div className="bg-surface-700/30 border border-slate-700/50 rounded-xl overflow-hidden">
+            {/* Messages */}
+            {followups.length > 0 && (
+              <div className="max-h-[400px] overflow-y-auto p-4 space-y-3">
+                {followups.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-xl px-4 py-2.5 text-sm leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-blue-600/20 border border-blue-500/30 text-slate-200'
+                          : 'bg-surface-700/50 border border-slate-700/50 text-slate-300'
+                      }`}
+                    >
+                      {msg.role === 'assistant' && (
+                        <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider">
+                          Master Strategist
+                        </div>
+                      )}
+                      <div className="whitespace-pre-wrap">{msg.message}</div>
+                    </div>
+                  </div>
+                ))}
+                {followupLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-surface-700/50 border border-slate-700/50 rounded-xl px-4 py-2.5 text-sm text-slate-400">
+                      <span className="inline-flex items-center gap-1.5">
+                        Thinking
+                        <span className="inline-block h-1 w-1 rounded-full bg-slate-400 animate-pulse" />
+                        <span className="inline-block h-1 w-1 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.2s' }} />
+                        <span className="inline-block h-1 w-1 rounded-full bg-slate-400 animate-pulse" style={{ animationDelay: '0.4s' }} />
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Input */}
+            <div className="border-t border-slate-700/50 p-3 flex gap-2">
+              <input
+                type="text"
+                value={followupInput}
+                onChange={(e) => setFollowupInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAskFollowup(); } }}
+                placeholder="Ask about this question... e.g., &quot;How does the latest Fed data affect assumption #2?&quot;"
+                disabled={followupLoading}
+                className="flex-1 bg-surface-800/50 border border-slate-700/30 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 transition-colors disabled:opacity-50"
+              />
+              <button
+                onClick={handleAskFollowup}
+                disabled={followupLoading || !followupInput.trim()}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+              >
+                {followupLoading ? '...' : 'Ask'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Evidence Timeline */}
       {evidence.length > 0 && (

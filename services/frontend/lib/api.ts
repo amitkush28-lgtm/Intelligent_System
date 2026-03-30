@@ -19,6 +19,7 @@ import {
   QuestionCreateRequest,
   QuestionEvidenceResponse,
   AccuracyHistoryResponse,
+  FollowupMessage,
 } from './types';
 
 const API_URL =
@@ -264,6 +265,17 @@ export async function updateQuestionStatus(
   return apiFetch(`/questions/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ status, resolution_note }),
+  });
+}
+
+export async function getFollowups(questionId: string): Promise<FollowupMessage[]> {
+  return apiFetch<FollowupMessage[]>(`/questions/${encodeURIComponent(questionId)}/followups`);
+}
+
+export async function askFollowup(questionId: string, message: string): Promise<FollowupMessage> {
+  return apiFetch<FollowupMessage>(`/questions/${encodeURIComponent(questionId)}/followups`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
   });
 }
 

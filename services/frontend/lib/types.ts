@@ -308,6 +308,13 @@ export interface QuestionCreateRequest {
   tags?: string[];
 }
 
+export interface FollowupMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  message: string;
+  created_at: string | null;
+}
+
 // ============================================
 // GENERIC
 // ============================================

@@ -409,6 +409,194 @@ async def get_question_evidence(
 
 
 # =============================================================================
+# FOLLOW-UP CONVERSATION
+# =============================================================================
+
+class FollowupRequest(BaseModel):
+    message: str = Field(..., min_length=2, description="Follow-up question or comment")
+
+
+class FollowupMessageResponse(BaseModel):
+    id: int
+    role: str
+    message: str
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+FOLLOWUP_SYSTEM_PROMPT = """You are the Master Strategist of a multi-agent intelligence system. The user is asking a follow-up question about a Living Question they've been tracking.
+
+You have full context on:
+- The original question and thesis
+- The current verdict, confidence level, and traffic-light status
+- All assumptions and their current states
+- Recent evidence that has been logged
+- Agent perspectives from 6 specialist agents
+
+Answer the user's follow-up question with the same voice as the intelligence newsletter: confident, direct, specific, honest about uncertainty. Reference specific assumptions by number when relevant. Cite specific data points from the evidence when available.
+
+Keep responses concise (2-4 paragraphs) unless the question demands more depth. End with a clear actionable takeaway when appropriate."""
+
+
+@router.get("/{question_id}/followups", response_model=List[FollowupMessageResponse])
+async def get_followups(
+    question_id: str,
+    db: Session = Depends(get_db),
+    _key: str = Depends(verify_api_key),
+):
+    """Get the follow-up conversation history for a question."""
+    from shared.models import LivingQuestion, QuestionFollowup
+
+    question = db.query(LivingQuestion).filter(LivingQuestion.id == question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    followups = (
+        db.query(QuestionFollowup)
+        .filter(QuestionFollowup.question_id == question_id)
+        .order_by(QuestionFollowup.created_at.asc())
+        .all()
+    )
+
+    return [FollowupMessageResponse(
+        id=f.id,
+        role=f.role,
+        message=f.message,
+        created_at=f.created_at,
+    ) for f in followups]
+
+
+@router.post("/{question_id}/followups", response_model=FollowupMessageResponse)
+async def ask_followup(
+    question_id: str,
+    body: FollowupRequest,
+    db: Session = Depends(get_db),
+    _key: str = Depends(verify_api_key),
+):
+    """Ask a follow-up question about a Living Question. Returns the AI response."""
+    from shared.models import LivingQuestion, QuestionAssumption, QuestionEvidence, QuestionFollowup
+
+    question = db.query(LivingQuestion).filter(LivingQuestion.id == question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    # Save the user message
+    user_msg = QuestionFollowup(
+        question_id=question_id,
+        role="user",
+        message=body.message,
+    )
+    db.add(user_msg)
+    db.flush()
+
+    # Build context from the question's current state
+    assumptions = (
+        db.query(QuestionAssumption)
+        .filter(QuestionAssumption.question_id == question_id)
+        .order_by(QuestionAssumption.assumption_number)
+        .all()
+    )
+    evidence = (
+        db.query(QuestionEvidence)
+        .filter(QuestionEvidence.question_id == question_id)
+        .order_by(desc(QuestionEvidence.detected_at))
+        .limit(15)
+        .all()
+    )
+
+    # Build conversation history (last 10 messages for context)
+    history = (
+        db.query(QuestionFollowup)
+        .filter(QuestionFollowup.question_id == question_id)
+        .order_by(QuestionFollowup.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    history.reverse()  # chronological order
+
+    context_parts = []
+    context_parts.append(f"QUESTION: {question.question}")
+    if question.context:
+        context_parts.append(f"CONTEXT: {question.context}")
+    context_parts.append(f"CATEGORY: {question.category or 'GENERAL'}")
+    context_parts.append(f"VERDICT: {question.thesis_verdict or 'PENDING'}")
+    context_parts.append(f"CONFIDENCE: {question.overall_confidence or '?'}%")
+    context_parts.append(f"STATUS: {question.overall_status or 'green'} (traffic light)")
+    if question.thesis_summary:
+        context_parts.append(f"THESIS: {question.thesis_summary}")
+    if question.recommendation:
+        context_parts.append(f"RECOMMENDATION: {question.recommendation}")
+
+    if assumptions:
+        context_parts.append("\nASSUMPTIONS:")
+        for a in assumptions:
+            context_parts.append(
+                f"  #{a.assumption_number} [{a.status.upper()}] ({a.confidence or '?'}%): {a.assumption_text}"
+            )
+            if a.current_assessment:
+                context_parts.append(f"    Assessment: {a.current_assessment[:200]}")
+            if a.green_to_yellow_trigger:
+                context_parts.append(f"    Yellow trigger: {a.green_to_yellow_trigger}")
+            if a.yellow_to_red_trigger:
+                context_parts.append(f"    Red trigger: {a.yellow_to_red_trigger}")
+
+    if evidence:
+        context_parts.append("\nRECENT EVIDENCE:")
+        for e in evidence[:10]:
+            impact = f"[{e.impact_level.upper()}]" if e.impact_level else ""
+            context_parts.append(f"  {impact} {e.evidence_summary[:200]}")
+            if e.source:
+                context_parts.append(f"    Source: {e.source}")
+
+    if question.agent_perspectives:
+        context_parts.append("\nAGENT PERSPECTIVES:")
+        for agent, text in question.agent_perspectives.items():
+            context_parts.append(f"  {agent}: {text[:200]}")
+
+    full_context = "\n".join(context_parts)
+
+    # Build messages for the LLM call (include conversation history)
+    conversation = f"""LIVING QUESTION CONTEXT:
+{full_context}
+
+CONVERSATION HISTORY:
+"""
+    for msg in history:
+        role_label = "USER" if msg.role == "user" else "ASSISTANT"
+        conversation += f"{role_label}: {msg.message}\n\n"
+
+    # Call Claude for the response
+    try:
+        response = await call_claude_sonnet(
+            system_prompt=FOLLOWUP_SYSTEM_PROMPT,
+            user_message=conversation,
+            max_tokens=2048,
+            temperature=0.3,
+        )
+    except Exception as e:
+        logger.error(f"Follow-up LLM call failed for {question_id}: {e}")
+        response = f"I wasn't able to process this follow-up right now. Please try again shortly. (Error: {str(e)[:100]})"
+
+    # Save the assistant response
+    assistant_msg = QuestionFollowup(
+        question_id=question_id,
+        role="assistant",
+        message=response,
+    )
+    db.add(assistant_msg)
+    db.commit()
+    db.refresh(assistant_msg)
+
+    return FollowupMessageResponse(
+        id=assistant_msg.id,
+        role="assistant",
+        message=assistant_msg.message,
+        created_at=assistant_msg.created_at,
+    )
+
+
+# =============================================================================
 # BACKGROUND ANALYSIS
 # =============================================================================
 
