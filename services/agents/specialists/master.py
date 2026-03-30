@@ -21,6 +21,7 @@ from services.agents.context_builder import (
     get_all_agent_predictions_for_master,
 )
 from services.agents.output_parser import parse_agent_output
+from services.agents.synthesis_engine import format_synthesis_for_master
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -70,7 +71,36 @@ The most valuable predictions cross domain boundaries:
 - A demographic shift that invalidates an investment thesis
 Trace these cross-domain cascades explicitly. This is where you add the most value.
 
-### 5. DECISION RELEVANCE — THE "SO WHAT?" SYNTHESIS
+### 5. DEEP DOT-CONNECTING — "WHAT IS BREWING?"
+This is what separates you from a news aggregator. You must identify:
+
+**A. MULTI-HOP CAUSAL CHAINS across domains:**
+Don't just say "geopolitical tension rises." Trace the FULL chain:
+Geopolitical event → economic consequence → market dislocation → political reaction →
+new geopolitical reality. Each hop must have a concrete transmission mechanism.
+
+**B. STRUCTURAL FORCE ALIGNMENT:**
+When multiple independent structural forces (demographic shifts, technology disruption,
+resource constraints, political cycles) all point in the same direction — even though
+they have different root causes — the probability of that outcome is MUCH higher than
+any individual force suggests. Find these alignments.
+
+**C. ABSENCE ANALYSIS — "THE DOG THAT DIDN'T BARK":**
+What SHOULD be happening that ISN'T? Silence from an entity that was previously active,
+expected events that didn't occur, sources that stopped reporting. These absences are
+often more telling than what IS being reported.
+
+**D. PRECONDITION CHAINS:**
+Which of our current predictions, if they resolve TRUE, create preconditions for OTHER
+predictions? Trace these dependency chains. If Prediction A enables Prediction B enables
+Prediction C, the compounded probability is lower but the cascade is more dangerous.
+
+**E. ENTITY NEXUS POINTS:**
+When the same entity (country, company, person) appears across 3+ domains simultaneously,
+that entity is a nexus where multiple forces converge. The next headline is likely to
+involve that entity.
+
+### 6. DECISION RELEVANCE — THE "SO WHAT?" SYNTHESIS
 Translate the combined prediction portfolio into actionable intelligence:
 - For INVESTORS: net risk posture, top 3 positions to add/reduce/hedge
 - For EXECUTIVES: which industries and supply chains face disruption in the next 90 days
@@ -122,21 +152,36 @@ Your output directly feeds the newsletter. Structure your analysis for this purp
 - Your BLIND SPOT flags become the "What We're Watching" section
 - Your CROSS-DOMAIN CASCADES become the Key Developments analysis
 
+### Working With The Synthesis Engine:
+You now receive pre-analyzed output from an automated Cross-Domain Synthesis Engine.
+This engine detects: entity convergence across domains, multi-hop causal chains, temporal
+dependencies between predictions, and suspicious information absences.
+
+USE this output as a STARTING POINT, not as gospel:
+- VALIDATE: Are the detected patterns real or spurious?
+- EXTEND: What chains did the engine miss that your deeper reasoning can find?
+- CHALLENGE: Which detected patterns are coincidence, not causation?
+- DEEPEN: The engine finds the skeleton — you add the flesh of WHY and SO WHAT
+
 ### What Makes You Indispensable:
 No individual specialist can see cross-domain patterns. Your unique value:
 - The Economist sees credit tightening but doesn't connect it to geopolitical leverage
 - The Geopolitical analyst sees military deployment but doesn't connect it to commodity markets
 - The Investor sees positioning data but doesn't connect it to political calendar
-- YOU see all three and identify the cascade that none of them can see alone"""
+- YOU see all three and identify the cascade that none of them can see alone
+- The Synthesis Engine finds statistical patterns, but YOU understand the HUMAN LOGIC behind them
+- Your job: find what is BREWING that hasn't hit headlines yet — the non-obvious connections
+  that become obvious only in hindsight"""
 
     async def analyze(
         self,
         context: Dict[str, Any],
         specialist_outputs: Dict[str, Dict[str, Any]] = None,
         db=None,
+        synthesis_results: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """
-        Master analysis with specialist outputs injected.
+        Master analysis with specialist outputs and synthesis engine output injected.
         """
         self.logger.info("Master Strategist starting synthesis")
 
@@ -146,9 +191,18 @@ No individual specialist can see cross-domain patterns. Your unique value:
         if db:
             all_predictions = get_all_agent_predictions_for_master(db)
 
+        # Format synthesis engine output for injection
+        synthesis_context = ""
+        if synthesis_results:
+            synthesis_context = format_synthesis_for_master(synthesis_results)
+            self.logger.info(
+                f"Injecting synthesis engine output: "
+                f"{synthesis_results.get('stats', {})}"
+            )
+
         system_prompt = self.build_system_prompt(context)
         user_message = self._build_master_user_message(
-            context, specialist_summary, all_predictions
+            context, specialist_summary, all_predictions, synthesis_context
         )
 
         total_tokens_est = (len(system_prompt) + len(user_message)) // 4
@@ -238,11 +292,26 @@ No individual specialist can see cross-domain patterns. Your unique value:
         context: Dict[str, Any],
         specialist_summary: str,
         all_predictions: Dict[str, List[Dict[str, Any]]],
+        synthesis_context: str = "",
     ) -> str:
-        """Build the master's user message with specialist outputs and cross-agent view."""
+        """Build the master's user message with specialist outputs, synthesis engine, and cross-agent view."""
         formatted = format_context_for_prompt(context)
 
         convergence_analysis = self._detect_convergence(all_predictions)
+
+        # Include synthesis engine output if available
+        synthesis_section = ""
+        if synthesis_context:
+            synthesis_section = f"""
+
+## CROSS-DOMAIN SYNTHESIS ENGINE PRE-ANALYSIS
+The automated synthesis engine has pre-identified the following cross-domain patterns.
+VALIDATE these, BUILD UPON them, and CHALLENGE any that seem forced.
+Your human-level judgment should go DEEPER than what the automated engine found.
+
+{synthesis_context}
+
+"""
 
         msg = f"""Synthesize the following specialist agent outputs and produce cross-domain analysis.
 
@@ -254,7 +323,7 @@ No individual specialist can see cross-domain patterns. Your unique value:
 
 ## CONVERGENCE/DIVERGENCE ANALYSIS
 {convergence_analysis}
-
+{synthesis_section}
 ## TODAY'S VERIFIED EVENTS (all domains)
 {formatted.get('TODAYS_EVENTS', 'No recent events.')}
 
@@ -274,26 +343,34 @@ Today's date: {datetime.utcnow().strftime('%Y-%m-%d')}
    - Produce a synthesized prediction with confidence
    - Specify the actionable implication
 
-2. CONTRADICTION RESOLUTION — Where do agents disagree? For each:
+2. DEEP DOT-CONNECTING — This is your MOST IMPORTANT task.
+   A. Validate and extend the synthesis engine's multi-hop causal chains.
+      Add chains the engine missed. For each chain: trace 3+ hops across
+      domain boundaries with concrete transmission mechanisms and timelines.
+   B. Identify STRUCTURAL FORCE ALIGNMENTS — where multiple independent forces
+      (demographic, technological, geopolitical, economic) converge.
+   C. Flag ENTITY NEXUS POINTS — entities appearing across 3+ domains.
+   D. Note SUSPICIOUS ABSENCES — what should be happening that isn't?
+   E. Map PRECONDITION CHAINS — which predictions enable which other predictions?
+
+3. CONTRADICTION RESOLUTION — Where do agents disagree? For each:
    - State both positions clearly
    - Explain WHY they disagree (different data, timeframe, framework?)
    - Produce your synthesized assessment with probability
 
-3. BLIND SPOT SCAN — "WHAT ARE WE NOT TALKING ABOUT?"
+4. BLIND SPOT SCAN — "WHAT ARE WE NOT TALKING ABOUT?"
    - Which REGIONS got zero coverage today?
    - Which RISK CATEGORIES are under-analyzed?
    - What ASSUMPTIONS are all agents sharing that might be wrong?
    - PRE-MORTEM: if we're catastrophically wrong in 6 months, what did we miss?
    Generate NOTES (type: "blind_spot") for each gap you identify.
 
-4. CROSS-DOMAIN CASCADES — Produce synthesis predictions that NO individual agent could make.
-   Trace the chain across domain boundaries.
-
 5. DECISION RELEVANCE — Produce a "SO WHAT" synthesis:
    - Net portfolio implication (risk-on, risk-off, mixed?)
    - Top 3 actions for an investor
    - Any travel/safety advisories
    - Key dates to watch this week
+   - WHAT IS BREWING that hasn't hit headlines yet?
 
 Respond with ONLY valid JSON."""
         return msg

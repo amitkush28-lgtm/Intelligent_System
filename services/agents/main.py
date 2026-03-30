@@ -50,6 +50,7 @@ from services.agents.specialists.political import PoliticalAgent
 from services.agents.specialists.sentiment import SentimentAgent
 from services.agents.specialists.wildcard import WildCardAgent
 from services.agents.specialists.master import MasterAgent
+from services.agents.synthesis_engine import run_synthesis_engine
 
 logger = setup_logging("agents")
 settings = get_settings()
@@ -459,13 +460,14 @@ async def _run_devil_advocates(
 async def _run_master(
     specialist_outputs: Dict[str, Dict[str, Any]],
     db,
+    synthesis_results: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
-    """Run the Master Strategist with specialist outputs."""
+    """Run the Master Strategist with specialist outputs and synthesis engine results."""
     logger.info("--- Running MASTER STRATEGIST ---")
 
     try:
         context = build_agent_context("master", db)
-        output = await MASTER_AGENT.analyze(context, specialist_outputs, db)
+        output = await MASTER_AGENT.analyze(context, specialist_outputs, db, synthesis_results)
 
         if output.get("raw_valid", False):
             # Persist master's predictions
@@ -584,9 +586,22 @@ async def run_analysis_cycle() -> Dict[str, Any]:
             logger.error(f"Devil's advocate phase failed: {e}")
             stats["debates"] = {"error": str(e)[:200]}
 
-        # Phase 4: Master Strategist
+        # Phase 4: Cross-Domain Synthesis Engine
+        synthesis_results = None
+        logger.info("--- Running Cross-Domain Synthesis Engine ---")
         try:
-            master_output = await _run_master(specialist_outputs, db)
+            synthesis_results = await run_synthesis_engine(specialist_outputs, db)
+            stats["synthesis"] = synthesis_results.get("stats", {})
+            logger.info(
+                f"Synthesis complete: {synthesis_results.get('stats', {})}"
+            )
+        except Exception as e:
+            logger.error(f"Synthesis engine failed: {e}")
+            stats["synthesis"] = {"error": str(e)[:200]}
+
+        # Phase 5: Master Strategist (now with synthesis engine output)
+        try:
+            master_output = await _run_master(specialist_outputs, db, synthesis_results)
             stats["master_output"] = {
                 "predictions": len(master_output.get("new_predictions", [])),
                 "updates": len(master_output.get("prediction_updates", [])),
