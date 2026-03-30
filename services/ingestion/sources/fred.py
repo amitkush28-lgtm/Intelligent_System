@@ -173,6 +173,7 @@ async def fetch_fred_series(
             )
 
             return {
+                "id": f"fred-{series_id}-{obs_date}",
                 "source": "fred",
                 "source_detail": f"fred.stlouisfed.org/series/{series_id}",
                 "timestamp": datetime.strptime(obs_date, "%Y-%m-%d") if obs_date else datetime.utcnow(),

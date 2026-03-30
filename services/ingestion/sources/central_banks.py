@@ -14,6 +14,7 @@ Signals detected:
 - Currency intervention signals
 """
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -142,7 +143,9 @@ async def fetch_central_bank_events(
                     if not is_relevant and not is_primary_bank:
                         continue
 
+                    title_hash = hashlib.md5(title.encode()).hexdigest()[:12]
                     events.append({
+                        "id": f"cb-{bank_code}-{title_hash}",
                         "source": "central_bank",
                         "source_detail": link or feed_url,
                         "source_category": "government_statement",

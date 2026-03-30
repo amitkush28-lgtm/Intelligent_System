@@ -136,6 +136,7 @@ async def fetch_cftc_events(
                             severity = "notable"
 
                     events.append({
+                        "id": f"cftc-{contract_key}-{report_date}",
                         "source": "cftc",
                         "source_detail": "cftc.gov/dea/futures",
                         "timestamp": timestamp,

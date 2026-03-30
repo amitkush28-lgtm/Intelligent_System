@@ -15,6 +15,7 @@ Signals detected:
 - Diversion patterns (indicate developing situations)
 """
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -128,8 +129,10 @@ async def _fetch_aviation_rss() -> List[Dict[str, Any]]:
                         continue
 
                     severity = _assess_severity(raw_text)
+                    entry_hash = hashlib.md5((title + link).encode()).hexdigest()[:12]
 
                     events.append({
+                        "id": f"flightaware-{entry_hash}",
                         "source": "flightaware",
                         "source_detail": link or feed_url,
                         "source_category": "established_newspaper",

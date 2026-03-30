@@ -11,6 +11,7 @@ Requires: CRUNCHBASE_API_KEY in environment.
 Falls back to TechCrunch RSS if API key not available.
 """
 
+import hashlib
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -111,7 +112,9 @@ async def _fetch_via_rss() -> List[Dict[str, Any]]:
 
                     severity = _assess_severity(raw_text)
 
+                    entry_hash = hashlib.md5((title + link).encode()).hexdigest()[:12]
                     events.append({
+                        "id": f"crunchbase-{entry_hash}",
                         "source": "crunchbase",
                         "source_detail": link or feed_url,
                         "source_category": "established_newspaper",
@@ -193,8 +196,10 @@ async def _fetch_via_api() -> List[Dict[str, Any]]:
 
                     amount_str = f"${amount_usd / 1_000_000:.0f}M" if amount_usd else "undisclosed"
                     raw_text = f"{org_name} raised {amount_str} in {round_type}"
+                    round_hash = hashlib.md5((org_name + announced + round_type).encode()).hexdigest()[:12]
 
                     events.append({
+                        "id": f"crunchbase-{round_hash}",
                         "source": "crunchbase",
                         "source_detail": f"https://www.crunchbase.com/funding_round/{item.get('uuid', '')}",
                         "source_category": "verified_social_media",

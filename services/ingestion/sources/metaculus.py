@@ -126,6 +126,7 @@ async def _fetch_metaculus_questions(
                     raw_text += f"{description[:150]}"
 
                 events.append({
+                    "id": f"metaculus-{question_id}",
                     "source": "metaculus",
                     "source_detail": f"metaculus.com/questions/{question_id}",
                     "timestamp": datetime.utcnow(),
@@ -214,6 +215,7 @@ async def _fetch_manifold_markets(
                 )
 
                 events.append({
+                    "id": f"manifold-{market_id}",
                     "source": "manifold",
                     "source_detail": f"manifold.markets/{slug}" if slug else f"manifold.markets",
                     "timestamp": datetime.utcnow(),

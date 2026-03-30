@@ -175,7 +175,10 @@ async def fetch_arxiv_events(
                     for author in paper["authors"][:2]:
                         entities.append({"name": author, "type": "person", "role": "researcher"})
 
+                    # Extract arxiv ID (e.g., "1234.5678" from "http://arxiv.org/abs/1234.5678v1")
+                    arxiv_id = paper["paper_id"].split("/abs/")[-1].split("v")[0] if paper["paper_id"] else ""
                     events.append({
+                        "id": f"arxiv-{arxiv_id}",
                         "source": "arxiv",
                         "source_detail": paper["url"],
                         "timestamp": paper["published"],

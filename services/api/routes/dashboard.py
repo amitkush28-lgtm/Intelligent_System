@@ -16,6 +16,7 @@ from shared.models import (
     ConfidenceTrail,
     Note,
     Debate,
+    Event,
 )
 from shared.schemas import (
     DashboardMetrics,
@@ -211,6 +212,95 @@ async def get_calibration_curve(
             k: [b.model_dump() for b in v] for k, v in by_agent.items()
         },
     )
+
+
+# All 23 expected data sources
+EXPECTED_SOURCES = [
+    "gdelt", "fred", "rss", "newsdata", "twelve_data", "congress_gov",
+    "acled", "polymarket", "cftc", "sec_edgar", "bls", "world_bank",
+    "ofac", "thenewsapi", "google_trends", "arxiv", "metaculus",
+    "manifold", "central_banks", "crunchbase", "flightaware",
+    "marine_traffic",
+]
+
+
+@router.get("/source-health")
+async def get_source_health(
+    db: Session = Depends(get_db),
+    _key: str = Depends(verify_api_key),
+):
+    """Per-source health audit: event counts, latest event date, staleness."""
+    from sqlalchemy import case, cast, Date
+
+    # Get count and latest timestamp per source
+    source_stats = (
+        db.query(
+            Event.source,
+            func.count(Event.id).label("event_count"),
+            func.max(Event.timestamp).label("latest_event"),
+            func.min(Event.timestamp).label("earliest_event"),
+        )
+        .group_by(Event.source)
+        .all()
+    )
+
+    now = datetime.utcnow()
+    source_map = {}
+    for row in source_stats:
+        hours_since = (now - row.latest_event).total_seconds() / 3600 if row.latest_event else None
+        source_map[row.source] = {
+            "source": row.source,
+            "event_count": row.event_count,
+            "latest_event": row.latest_event.isoformat() if row.latest_event else None,
+            "earliest_event": row.earliest_event.isoformat() if row.earliest_event else None,
+            "hours_since_last": round(hours_since, 1) if hours_since else None,
+            "status": "healthy" if hours_since and hours_since < 48 else
+                      "stale" if hours_since and hours_since < 168 else
+                      "dead" if hours_since else "no_data",
+        }
+
+    # Build full report including missing sources
+    results = []
+    for src in EXPECTED_SOURCES:
+        if src in source_map:
+            results.append(source_map[src])
+        else:
+            results.append({
+                "source": src,
+                "event_count": 0,
+                "latest_event": None,
+                "earliest_event": None,
+                "hours_since_last": None,
+                "status": "no_data",
+            })
+
+    # Add any unexpected sources
+    for src, data in source_map.items():
+        if src not in EXPECTED_SOURCES:
+            data["status"] = data["status"] + " (unexpected)"
+            results.append(data)
+
+    # Sort: no_data/dead first, then by hours since last
+    status_order = {"no_data": 0, "dead": 1, "stale": 2, "healthy": 3}
+    results.sort(key=lambda x: (status_order.get(x["status"], 0), -(x["hours_since_last"] or 99999)))
+
+    total = sum(r["event_count"] for r in results)
+    healthy = sum(1 for r in results if r["status"] == "healthy")
+    stale = sum(1 for r in results if r["status"] == "stale")
+    dead = sum(1 for r in results if r["status"] == "dead")
+    no_data = sum(1 for r in results if r["status"] == "no_data")
+
+    return {
+        "summary": {
+            "total_events": total,
+            "sources_expected": len(EXPECTED_SOURCES),
+            "sources_healthy": healthy,
+            "sources_stale": stale,
+            "sources_dead": dead,
+            "sources_no_data": no_data,
+        },
+        "sources": results,
+    }
 
 
 @router.get("/accuracy-history")

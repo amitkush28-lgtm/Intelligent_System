@@ -4,6 +4,7 @@ Tracks search interest trends as pre-news signals.
 Rising search interest in niche topics precedes mainstream coverage by 3-6 months.
 """
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import List, Dict, Any
@@ -148,7 +149,10 @@ async def fetch_google_trends_events(
                             f"This is a {domain} domain signal suggesting growing public attention."
                         )
 
+                        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+                        trend_id = hashlib.md5((keyword + date_str).encode()).hexdigest()[:12]
                         events.append({
+                            "id": f"gtrends-{trend_id}",
                             "source": "google_trends",
                             "source_detail": f"trends.google.com/trends/explore?q={keyword.replace(' ', '+')}",
                             "timestamp": datetime.utcnow(),
@@ -203,8 +207,11 @@ async def _fetch_trending_searches_fallback(timeout: float = 30.0) -> List[Dict[
                     continue
 
                 raw_text = f"Google Trends: '{topic}' is trending in United States today."
+                date_str = datetime.utcnow().strftime("%Y-%m-%d")
+                trending_id = hashlib.md5((topic + date_str).encode()).hexdigest()[:12]
 
                 events.append({
+                    "id": f"gtrends-{trending_id}",
                     "source": "google_trends",
                     "source_detail": f"trends.google.com/trends/trendingsearches/daily?geo=US",
                     "timestamp": datetime.utcnow(),

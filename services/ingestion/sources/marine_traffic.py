@@ -16,6 +16,7 @@ Signals detected:
 - Naval exercises and military activity
 """
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -177,7 +178,9 @@ async def _fetch_maritime_rss() -> List[Dict[str, Any]]:
                     if any(t in lower for t in ["shipping rates", "freight", "container", "supply chain", "congestion"]):
                         domain = "economic"
 
+                    entry_hash = hashlib.md5((title + link).encode()).hexdigest()[:12]
                     events.append({
+                        "id": f"marine_traffic-{entry_hash}",
                         "source": "marine_traffic",
                         "source_detail": link or feed_url,
                         "source_category": "established_newspaper",

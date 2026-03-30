@@ -185,6 +185,7 @@ def _persist_events(events: List[Dict[str, Any]], db) -> int:
         try:
             event_id = event.get("id", "")
             if not event_id:
+                logger.warning(f"Dropping event with no ID from source={event.get('source', '?')}, title={str(event.get('title', event.get('raw_text', '')))[:80]}")
                 continue
 
             source_reliability = _get_source_reliability(
