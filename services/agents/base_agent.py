@@ -289,6 +289,9 @@ that most analysts miss because they stop thinking at the first-order effect.
 ## CROSS-DOMAIN SIGNALS FROM OTHER AGENTS
 {formatted.get('CROSS_DOMAIN_SIGNALS', 'No cross-domain signals yet.')}
 
+## TREND INTELLIGENCE BRIEF — What Is Changing and How Fast
+{formatted.get('TREND_INTELLIGENCE', 'No trend intelligence available.')}
+
 ## ACTIVE PREDICTIONS TO UPDATE
 {formatted.get('CURRENT_PREDICTIONS', 'No active predictions.')}
 

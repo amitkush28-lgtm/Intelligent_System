@@ -108,6 +108,9 @@ def build_agent_context(
     # 10. Current market data — ALL agents need this to avoid stale price references
     context["current_market_data"] = _get_current_market_data(db)
 
+    # 11. Trend Intelligence Brief — what's changing and how fast
+    context["trend_intelligence"] = _get_trend_intelligence(agent_name)
+
     return context
 
 
@@ -228,12 +231,37 @@ def format_context_for_prompt(context: Dict[str, Any]) -> Dict[str, str]:
     else:
         formatted["CROSS_DOMAIN_SIGNALS"] = "No cross-domain signals from other agents yet."
 
+    # Trend intelligence brief
+    trend = context.get("trend_intelligence", "")
+    if trend:
+        formatted["TREND_INTELLIGENCE"] = trend
+    else:
+        formatted["TREND_INTELLIGENCE"] = "No trend intelligence available for this cycle."
+
     return formatted
 
 
 # ============================================
 # PRIVATE HELPERS
 # ============================================
+
+def _get_trend_intelligence(agent_name: str) -> str:
+    """Get formatted trend intelligence brief from the module-level cache."""
+    try:
+        from services.agents.main import get_trend_cache
+        from services.agents.trend_intelligence import format_trend_brief_for_agents
+
+        trend_results = get_trend_cache()
+        if trend_results:
+            return format_trend_brief_for_agents(trend_results, agent_name)
+        return ""
+    except ImportError:
+        logger.debug("Trend intelligence module not available")
+        return ""
+    except Exception as e:
+        logger.warning(f"Failed to get trend intelligence: {e}")
+        return ""
+
 
 def _get_recent_events(
     db: Session,

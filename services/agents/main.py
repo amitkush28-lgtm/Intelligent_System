@@ -51,9 +51,22 @@ from services.agents.specialists.sentiment import SentimentAgent
 from services.agents.specialists.wildcard import WildCardAgent
 from services.agents.specialists.master import MasterAgent
 from services.agents.synthesis_engine import run_synthesis_engine
+from services.agents.trend_intelligence import run_trend_intelligence, format_trend_brief_for_agents
 
 logger = setup_logging("agents")
 settings = get_settings()
+
+# Module-level cache for trend intelligence results (populated each cycle)
+_trend_intelligence_cache: Optional[Dict[str, Any]] = None
+
+
+def _set_trend_cache(results: Dict[str, Any]):
+    global _trend_intelligence_cache
+    _trend_intelligence_cache = results
+
+
+def get_trend_cache() -> Optional[Dict[str, Any]]:
+    return _trend_intelligence_cache
 
 # Configuration
 INGESTION_QUEUE = "ingestion_complete"
@@ -525,6 +538,25 @@ async def run_analysis_cycle() -> Dict[str, Any]:
 
     with get_db_session() as db:
         specialist_outputs = {}
+        trend_results = None
+
+        # Phase 0: Trend Intelligence — compute what's changing and how fast
+        logger.info("--- Running Trend Intelligence Agent ---")
+        try:
+            trend_results = await run_trend_intelligence(db)
+            stats["trend_intelligence"] = {
+                "elapsed": trend_results.get("elapsed_seconds"),
+                "alerts": len(trend_results.get("brief", {}).get("critical_alerts", [])),
+                "movers": len(trend_results.get("brief", {}).get("confidence_movers", [])),
+            }
+            logger.info(
+                f"Trend Intelligence complete: {stats['trend_intelligence']}"
+            )
+            # Store in module-level cache so context_builder can access it
+            _set_trend_cache(trend_results)
+        except Exception as e:
+            logger.error(f"Trend Intelligence failed: {e}")
+            stats["trend_intelligence"] = {"error": str(e)[:200]}
 
         # Phase 1: Run all specialists
         for agent in SPECIALIST_AGENTS:
