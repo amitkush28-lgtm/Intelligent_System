@@ -25,7 +25,9 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
-from shared.database import get_db
+from fastapi.responses import JSONResponse
+
+from shared.database import get_db, SessionLocal
 from shared.models import Prediction, Event, WeakSignal, Debate, Note, ConfidenceTrail, Claim
 from shared.config import get_settings
 from shared.llm_client import call_claude_sonnet
@@ -291,8 +293,12 @@ def _build_report_context(db: Session, theme: str) -> str:
     return "\n".join(parts)
 
 
-async def _generate_report(db: Session, theme: str):
-    """Generate a thematic report using Claude."""
+async def _generate_report(theme: str):
+    """Generate a thematic report using Claude.
+
+    Creates its own DB session because FastAPI background tasks
+    run after the request's session is closed.
+    """
     global _latest_reports
 
     if theme not in _latest_reports:
@@ -301,6 +307,7 @@ async def _generate_report(db: Session, theme: str):
 
     _latest_reports[theme]["generating"] = True
 
+    db = SessionLocal()
     try:
         context = _build_report_context(db, theme)
         theme_config = THEMES.get(theme, {})
@@ -340,6 +347,8 @@ Begin the report now:"""
         _latest_reports[theme]["generating"] = False
         _latest_reports[theme]["content"] = f"Report generation failed: {str(e)[:200]}"
         _latest_reports[theme]["generated_at"] = datetime.utcnow().isoformat()
+    finally:
+        db.close()
 
 
 @router.post("/generate", response_model=ReportResponse)
@@ -362,7 +371,7 @@ async def generate_report(
     if _latest_reports[theme]["generating"]:
         return ReportResponse(type=theme, status="generating")
 
-    background_tasks.add_task(_generate_report, db, theme)
+    background_tasks.add_task(_generate_report, theme)
 
     return ReportResponse(
         type=theme,
@@ -395,96 +404,84 @@ async def get_latest_report(
     return ReportResponse(type=type, status="empty")
 
 
+def _apply_inline_markdown(text: str) -> str:
+    """Convert markdown bold/italic to reportlab XML tags."""
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+    return text
+
+
 def _parse_markdown_to_paragraphs(markdown_text: str, styles: Dict[str, Any]) -> List[Any]:
     """Parse markdown content into reportlab elements.
 
-    Handles:
-    - Headings (# ## ###)
-    - Bold (**text**)
-    - Italic (*text*)
-    - Bullet points (- *)
-    - Code blocks
+    Args:
+        markdown_text: The markdown content to parse
+        styles: Dict with keys 'body', 'h1', 'h2', 'h3'
+
+    Handles: headings, bold, italic, bullet points, code blocks.
     """
     elements = []
     lines = markdown_text.split('\n')
     in_code_block = False
     current_bullets = []
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
+    def flush_bullets():
+        if current_bullets:
+            bullet_text = '<br/>'.join(current_bullets)
+            elements.append(Paragraph(bullet_text, styles['body']))
+            elements.append(Spacer(1, 0.1 * inch))
+            current_bullets.clear()
 
-        # Code blocks
-        if line.strip().startswith('```'):
+    for line in lines:
+        stripped = line.strip()
+
+        # Code blocks — skip content
+        if stripped.startswith('```'):
             in_code_block = not in_code_block
-            i += 1
             continue
-
         if in_code_block:
-            i += 1
             continue
 
-        # Flush pending bullets
-        if not line.strip().startswith(('-', '*')) or line.startswith('- ') == False:
-            if current_bullets:
-                bullet_text = '<br/>'.join(current_bullets)
-                bullet_para = Paragraph(bullet_text, styles['Normal'])
-                elements.append(bullet_para)
-                elements.append(Spacer(1, 0.1 * inch))
-                current_bullets = []
+        # Check if this is a bullet line
+        is_bullet = stripped.startswith('- ') or stripped.startswith('* ')
+
+        # Flush pending bullets before a non-bullet line
+        if not is_bullet:
+            flush_bullets()
 
         # Headings
         if line.startswith('# '):
             if elements:
                 elements.append(Spacer(1, 0.2 * inch))
-            text = line[2:].strip()
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            elements.append(Paragraph(text, styles['Heading1']))
+            elements.append(Paragraph(_apply_inline_markdown(line[2:].strip()), styles['h1']))
             elements.append(Spacer(1, 0.15 * inch))
 
         elif line.startswith('## '):
             if elements:
                 elements.append(Spacer(1, 0.15 * inch))
-            text = line[3:].strip()
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            elements.append(Paragraph(text, styles['Heading2']))
+            elements.append(Paragraph(_apply_inline_markdown(line[3:].strip()), styles['h2']))
             elements.append(Spacer(1, 0.1 * inch))
 
         elif line.startswith('### '):
             if elements:
                 elements.append(Spacer(1, 0.1 * inch))
-            text = line[4:].strip()
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-            elements.append(Paragraph(text, styles['Heading3']))
+            elements.append(Paragraph(_apply_inline_markdown(line[4:].strip()), styles['h3']))
             elements.append(Spacer(1, 0.08 * inch))
 
         # Bullet points
-        elif line.strip().startswith('- ') or line.strip().startswith('* '):
-            bullet_text = line.strip()[2:].strip()
-            bullet_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', bullet_text)
-            bullet_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', bullet_text)
-            current_bullets.append(f"• {bullet_text}")
+        elif is_bullet:
+            bullet_text = _apply_inline_markdown(stripped[2:].strip())
+            current_bullets.append(f"\u2022 {bullet_text}")
 
         # Regular paragraphs
-        elif line.strip():
-            text = line.strip()
-            text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-            text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+        elif stripped:
+            text = _apply_inline_markdown(stripped)
             if text:
-                elements.append(Paragraph(text, styles['Normal']))
+                elements.append(Paragraph(text, styles['body']))
                 elements.append(Spacer(1, 0.1 * inch))
 
-        i += 1
-
     # Flush any remaining bullets
-    if current_bullets:
-        bullet_text = '<br/>'.join(current_bullets)
-        bullet_para = Paragraph(bullet_text, styles['Normal'])
-        elements.append(bullet_para)
-
+    flush_bullets()
     return elements
 
 
@@ -511,75 +508,68 @@ def _generate_pdf(content: str, title: str, source_type: str) -> bytes:
         bottomMargin=0.75 * inch,
     )
 
-    # Get base styles and customize
-    styles = getSampleStyleSheet()
+    # Build custom styles dict for use throughout
+    base = getSampleStyleSheet()
 
-    # Override default styles for clean look
-    styles.add(ParagraphStyle(
-        name='CustomBody',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=11,
-        leading=16,
-        alignment=TA_JUSTIFY,
-        textColor=colors.HexColor('#333333'),
-    ))
-
-    styles.add(ParagraphStyle(
-        name='CustomHeading1',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=24,
-        leading=28,
-        alignment=TA_CENTER,
-        textColor=colors.HexColor('#1a1a1a'),
-        spaceAfter=12,
-    ))
-
-    styles.add(ParagraphStyle(
-        name='CustomHeading2',
-        parent=styles['Heading2'],
-        fontName='Helvetica-Bold',
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor('#2a2a2a'),
-        spaceAfter=8,
-        spaceBefore=8,
-    ))
-
-    styles.add(ParagraphStyle(
-        name='CustomHeading3',
-        parent=styles['Heading3'],
-        fontName='Helvetica-BoldOblique',
-        fontSize=13,
-        leading=16,
-        textColor=colors.HexColor('#3a3a3a'),
-        spaceAfter=6,
-    ))
-
-    styles['Normal'] = styles['CustomBody']
-    styles['Heading1'] = styles['CustomHeading1']
-    styles['Heading2'] = styles['CustomHeading2']
-    styles['Heading3'] = styles['CustomHeading3']
+    custom = {
+        'body': ParagraphStyle(
+            name='CustomBody',
+            parent=base['Normal'],
+            fontName='Helvetica',
+            fontSize=11,
+            leading=16,
+            alignment=TA_JUSTIFY,
+            textColor=colors.HexColor('#333333'),
+        ),
+        'h1': ParagraphStyle(
+            name='CustomH1',
+            parent=base['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=24,
+            leading=28,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor('#1a1a1a'),
+            spaceAfter=12,
+        ),
+        'h2': ParagraphStyle(
+            name='CustomH2',
+            parent=base['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=16,
+            leading=20,
+            textColor=colors.HexColor('#2a2a2a'),
+            spaceAfter=8,
+            spaceBefore=8,
+        ),
+        'h3': ParagraphStyle(
+            name='CustomH3',
+            parent=base['Heading3'],
+            fontName='Helvetica-BoldOblique',
+            fontSize=13,
+            leading=16,
+            textColor=colors.HexColor('#3a3a3a'),
+            spaceAfter=6,
+        ),
+    }
 
     # Build story
     story = []
 
     # Title page
     story.append(Spacer(1, 1.5 * inch))
-    story.append(Paragraph(title, styles['Heading1']))
+    story.append(Paragraph(title, custom['h1']))
     story.append(Spacer(1, 0.3 * inch))
 
     subtitle = "Professional Intelligence Report" if source_type == "report" else "Intelligence Newsletter"
-    story.append(Paragraph(subtitle, styles['Heading2']))
+    story.append(Paragraph(subtitle, custom['h2']))
     story.append(Spacer(1, 0.2 * inch))
 
     timestamp = datetime.utcnow().strftime("%B %d, %Y")
-    story.append(Paragraph(f"Generated: {timestamp}", styles['Normal']))
+    story.append(Paragraph(f"Generated: {timestamp}", custom['body']))
     story.append(PageBreak())
 
     # Parse and add content
-    parsed_elements = _parse_markdown_to_paragraphs(content, styles)
+    parsed_elements = _parse_markdown_to_paragraphs(content, custom)
     story.extend(parsed_elements)
 
     # Build PDF
@@ -612,31 +602,29 @@ async def export_pdf(
             content = _latest_reports[type]["content"]
             title = THEMES.get(type, {}).get("name", type.replace("_", " ").title())
         else:
-            return {"error": f"No report generated for type '{type}'"}
+            return JSONResponse(status_code=404, content={"error": f"No report generated for type '{type}'"})
 
     # Check if it's a newsletter (look in newsletter store if available)
     elif source == "newsletter":
-        # Import newsletter store dynamically to avoid circular imports
         try:
             from services.api.routes.newsletter import _latest_newsletters
             if type in _latest_newsletters and _latest_newsletters[type]["content"]:
                 content = _latest_newsletters[type]["content"]
                 title = f"{type.capitalize()} Intelligence Newsletter"
             else:
-                return {"error": f"No newsletter generated for cadence '{type}'"}
+                return JSONResponse(status_code=404, content={"error": f"No newsletter generated for cadence '{type}'"})
         except ImportError:
-            return {"error": "Newsletter module not available"}
+            return JSONResponse(status_code=500, content={"error": "Newsletter module not available"})
     else:
-        return {"error": f"Invalid source '{source}' or type '{type}'"}
+        return JSONResponse(status_code=400, content={"error": f"Invalid source '{source}' or type '{type}'"})
 
     if not content:
-        return {"error": "No content available to export"}
+        return JSONResponse(status_code=404, content={"error": "No content available to export"})
 
     # Generate PDF
     try:
         pdf_bytes = _generate_pdf(content, title, source)
 
-        # Return as streaming response with attachment header
         filename = f"{type}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
@@ -645,4 +633,4 @@ async def export_pdf(
         )
     except Exception as e:
         logger.error(f"PDF generation failed: {e}")
-        return {"error": f"PDF generation failed: {str(e)[:200]}"}
+        return JSONResponse(status_code=500, content={"error": f"PDF generation failed: {str(e)[:200]}"})
