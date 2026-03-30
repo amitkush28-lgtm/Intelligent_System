@@ -138,8 +138,11 @@ async def call_claude_with_web_search(
 
 
 def parse_structured_json(response_text: str) -> dict:
-    """Extract JSON from LLM response, handling markdown fences and mixed content."""
+    """Extract JSON from LLM response, handling markdown fences, mixed content, and truncation."""
     import re
+
+    if not response_text or not response_text.strip():
+        return {}
 
     text = response_text.strip()
 
@@ -196,7 +199,114 @@ def parse_structured_json(response_text: str) -> dict:
     text = text.strip()
     try:
         return json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.warning(f"Failed to parse JSON from LLM response: {e}")
-        logger.debug(f"Raw response: {response_text[:500]}")
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 5: Truncated JSON recovery — if the response was cut off mid-JSON,
+    # try to close open structures and salvage what we can
+    recovered = _recover_truncated_json(text)
+    if recovered:
+        return recovered
+
+    logger.warning(f"Failed to parse JSON from LLM response after all strategies")
+    logger.debug(f"Raw response (first 500 chars): {response_text[:500]}")
+    logger.debug(f"Raw response (last 200 chars): {response_text[-200:]}")
+    return {}
+
+
+def _recover_truncated_json(text: str) -> dict:
+    """
+    Attempt to recover a truncated JSON response by closing open structures.
+    This handles the common case where max_tokens cuts off mid-response.
+    """
+    # Find the start of the JSON object
+    first_brace = text.find('{')
+    if first_brace == -1:
         return {}
+
+    json_text = text[first_brace:]
+
+    # Try progressively more aggressive truncation repair
+    # Step 1: Try closing with just braces/brackets
+    for attempt in range(20):
+        # Count open structures
+        in_string = False
+        escape_next = False
+        open_braces = 0
+        open_brackets = 0
+
+        for ch in json_text:
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                open_braces += 1
+            elif ch == '}':
+                open_braces -= 1
+            elif ch == '[':
+                open_brackets += 1
+            elif ch == ']':
+                open_brackets -= 1
+
+        if open_braces == 0 and open_brackets == 0:
+            # Already balanced — shouldn't be here, but try parse
+            try:
+                return json.loads(json_text)
+            except json.JSONDecodeError:
+                break
+
+        # Try to close the JSON by removing the last incomplete element and closing
+        # First, trim trailing incomplete content (partial strings, trailing commas)
+        trimmed = json_text.rstrip()
+
+        # Remove trailing incomplete content
+        while trimmed and trimmed[-1] in (',', ':', '"', ' ', '\n', '\r', '\t'):
+            trimmed = trimmed[:-1].rstrip()
+
+        # If we end in the middle of a string value, find and close it
+        if trimmed and trimmed[-1] not in ('}', ']', '"', 'e', 'l'):
+            # We're in the middle of something, try to find last complete element
+            # Look for last valid JSON boundary
+            for boundary in ['},', '},\n', '}\n', ']', '",', '"\n']:
+                last_boundary = trimmed.rfind(boundary)
+                if last_boundary > 0:
+                    trimmed = trimmed[:last_boundary + len(boundary)].rstrip().rstrip(',')
+                    break
+
+        # Close remaining open structures
+        closers = ']' * max(0, open_brackets) + '}' * max(0, open_braces)
+
+        # Try various truncation points
+        candidate = trimmed + closers
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                logger.info(f"Recovered truncated JSON (closed {open_braces} braces, {open_brackets} brackets)")
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Try trimming more aggressively — remove last entry in array/object
+        last_comma = trimmed.rfind(',')
+        if last_comma > 0:
+            json_text = trimmed[:last_comma] + closers
+            try:
+                parsed = json.loads(json_text)
+                if isinstance(parsed, dict):
+                    logger.info(f"Recovered truncated JSON by removing last incomplete element")
+                    return parsed
+            except json.JSONDecodeError:
+                json_text = trimmed[:last_comma]
+                continue
+
+        break
+
+    return {}

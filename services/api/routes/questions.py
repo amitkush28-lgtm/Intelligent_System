@@ -932,16 +932,34 @@ Today's date: {datetime.utcnow().strftime('%Y-%m-%d')}
 
 Using the research above, produce your analysis. You MUST respond with ONLY valid JSON — no markdown, no explanation, no text before or after the JSON object."""
 
-        json_response = await call_claude_sonnet(
-            system_prompt=QUESTION_ANALYSIS_SYSTEM_PROMPT,
-            user_message=analysis_message,
-            max_tokens=4096,
-            temperature=0.2,
-        )
+        # Attempt analysis with retry — increase tokens on retry if truncation suspected
+        analysis = None
+        for attempt, tokens in enumerate([8192, 12000], 1):
+            try:
+                json_response = await call_claude_sonnet(
+                    system_prompt=QUESTION_ANALYSIS_SYSTEM_PROMPT,
+                    user_message=analysis_message,
+                    max_tokens=tokens,
+                    temperature=0.2,
+                )
 
-        analysis = parse_structured_json(json_response)
+                analysis = parse_structured_json(json_response)
+                if analysis and analysis.get("thesis_summary"):
+                    logger.info(f"Analysis parsed on attempt {attempt} ({tokens} max_tokens, response={len(json_response)} chars)")
+                    break
+                else:
+                    logger.warning(
+                        f"Parse attempt {attempt} for {question_id}: empty or missing thesis_summary "
+                        f"(response={len(json_response)} chars, max_tokens={tokens})"
+                    )
+                    logger.debug(f"Response tail: ...{json_response[-300:]}")
+                    analysis = None
+            except Exception as e:
+                logger.error(f"LLM call attempt {attempt} failed for {question_id}: {e}")
+                analysis = None
+
         if not analysis:
-            logger.error(f"Failed to parse analysis for {question_id}")
+            logger.error(f"Failed to parse analysis for {question_id} after all attempts")
             with get_db_session() as db:
                 from shared.models import LivingQuestion
                 q = db.query(LivingQuestion).filter(LivingQuestion.id == question_id).first()
